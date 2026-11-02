@@ -1,0 +1,86 @@
+[
+  {
+    "case": "(A) shapes on p', FF'  (default)",
+    "ds": 0.1,
+    "iterations": 23,
+    "res_P": 1.8197048106992692e-11,
+    "res_P2": 2.50439488145771e-11
+  },
+  {
+    "case": "(B) shapes on p, F^2, exponents (2,2,2)",
+    "ds": 0.1,
+    "iterations": 800,
+    "res_P": 0.1157233337466427,
+    "res_P2": 1.3156638473049798e-12
+  },
+  {
+    "case": "(C) shapes on p, F^2, exponents (1,1,1)",
+    "ds": 0.1,
+    "iterations": 2,
+    "res_P": 1.048986308393967e-13,
+    "res_P2": 9.815937810538368e-14
+  },
+  {
+    "case": "(D) shapes on p, F^2, exponents (1,2,1)",
+    "ds": 0.1,
+    "iterations": 15,
+    "res_P": 1.7890145344316478e-11,
+    "res_P2": 2.2429438355883275e-11
+  },
+  {
+    "case": "(A) shapes on p', FF'  (default)",
+    "ds": 0.05,
+    "iterations": 23,
+    "res_P": 1.6333855867441954e-11,
+    "res_P2": 2.2439574754885316e-11
+  },
+  {
+    "case": "(B) shapes on p, F^2, exponents (2,2,2)",
+    "ds": 0.05,
+    "iterations": 800,
+    "res_P": 0.11394373222125098,
+    "res_P2": 3.8108995466881126e-13
+  },
+  {
+    "case": "(C) shapes on p, F^2, exponents (1,1,1)",
+    "ds": 0.05,
+    "iterations": 2,
+    "res_P": 5.2002212482389755e-14,
+    "res_P2": 7.059293389246798e-14
+  },
+  {
+    "case": "(D) shapes on p, F^2, exponents (1,2,1)",
+    "ds": 0.05,
+    "iterations": 15,
+    "res_P": 1.1431295154286003e-11,
+    "res_P2": 1.4188466141596609e-11
+  },
+  {
+    "case": "(A) shapes on p', FF'  (default)",
+    "ds": 0.035,
+    "iterations": 23,
+    "res_P": 1.7657824800248295e-11,
+    "res_P2": 2.4284999785562137e-11
+  },
+  {
+    "case": "(B) shapes on p, F^2, exponents (2,2,2)",
+    "ds": 0.035,
+    "iterations": 800,
+    "res_P": 0.11161501408224939,
+    "res_P2": 2.4016744997081464e-13
+  },
+  {
+    "case": "(C) shapes on p, F^2, exponents (1,1,1)",
+    "ds": 0.035,
+    "iterations": 2,
+    "res_P": 8.774728258586264e-14,
+    "res_P2": 8.296962010392739e-14
+  },
+  {
+    "case": "(D) shapes on p, F^2, exponents (1,2,1)",
+    "ds": 0.035,
+    "iterations": 15,
+    "res_P": 1.4684953807463148e-11,
+    "res_P2": 1.8384810730338946e-11
+  }
+]
