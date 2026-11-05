@@ -17,14 +17,14 @@ def run(ds):
                 rel_max=err.max() / ana.max(), time=dt), (psi, rm, zm, ins, co, bnd)
 
 # --- headline figure (numerical | analytic | error)
-res, sol = run(0.02)
+res, sol = run(6e-3)
 print("headline:", res)
 with quiet():
     gs.make_plots(*[sol[0], sol[1], sol[2], sol[3], sol[4], sol[5]], fname_override='soloviev_benchmark.png')
 
 # --- convergence study
 rows = []
-for ds in [0.20, 0.14, 0.10, 0.07, 0.05, 0.035, 0.025, 0.018, 0.012]:
+for ds in [0.20, 0.14, 0.10, 0.07, 0.05, 0.035, 0.025, 0.018, 0.012, 0.0083, 0.006]:
     r, _ = run(ds); rows.append(r)
     print(f"ds={ds:5.3f}  N={r['N']:6d}  max_err={r['max_err']:.3e}  mean_err={r['mean_err']:.3e}  t={r['time']:.2f}s")
 save_json('soloviev_convergence.json', rows)

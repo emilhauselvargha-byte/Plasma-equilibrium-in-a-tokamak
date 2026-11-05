@@ -45,13 +45,13 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter
 from scipy.optimize import bisect, brentq, newton, minimize_scalar
 from scipy.sparse import lil_matrix
-from scipy.sparse.linalg import spsolve, LinearOperator, eigs
+from scipy.sparse.linalg import splu, spsolve, LinearOperator, eigs
 import time
 
 # Output / display controls
 OUTPUT_DIR = 'figures'
 THEME = 'light'              # 'light' (white background, default) or 'dark'
-SHOW = False                # True for interactive windows (e.g. %matplotlib qt)
+SHOW = True                # True for interactive windows (e.g. %matplotlib qt)
 SPECTRAL_ANALYSIS = False   # Arnoldi study of the Picard Jacobian (slow on fine grids)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -66,8 +66,8 @@ SPECTRAL_ANALYSIS = False   # Arnoldi study of the Picard Jacobian (slow on fine
 #                            Z(R) = ±√(a − b(R²−R0²)²) / R
 #                            (closed D-shape; requires R0, k0, q0 — see I-C)
 #
-#GEOMETRY = 'SOLOVIEV'           # <── change here
-GEOMETRY = 'SHAFRANOV'
+GEOMETRY = 'SOLOVIEV'           # <── change here
+#GEOMETRY = 'SHAFRANOV'
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION I-B  ·  PHYSICS MODE SELECTION
@@ -81,8 +81,8 @@ GEOMETRY = 'SHAFRANOV'
 #
 #  PHYSICS = 'CUSTOM'            — you supply source_custom(r, psi_n) directly
 #
-#PHYSICS = 'SOLOVIEV_LINEAR'     # <── change here
-PHYSICS = 'PICARD_NONLINEAR'
+PHYSICS = 'SOLOVIEV_LINEAR'     # <── change here
+#PHYSICS = 'PICARD_NONLINEAR'
 #PHYSICS = 'CUSTOM'
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -91,7 +91,7 @@ PHYSICS = 'PICARD_NONLINEAR'
 
 # ── Shared ────────────────────────────────────────────────────────────────────
 R0  = 0.95     # major radius (normalised units; set to 1 for true normalisation)
-ds  = 5e-2    # arc-length step along boundary (smaller = finer grid, slower)
+ds  = 1.2e-2    # arc-length step along boundary (smaller = finer grid, slower)
 
 # ── SHAFRANOV shape parameters (ignored when GEOMETRY = 'SOLOVIEV') ──────────
 a_sha     = 0.6   # minor radius  (normalised to R0 if R0=1, else metres)
@@ -483,7 +483,7 @@ def assemble(rmesh, zmesh, inside, node_id, coords):
             A[k, k_zm] = c_zm
 
     print(f"    Dirichlet nodes: {len(bnd)}  /  {N} DOFs total")
-    return A.tocsr(), bnd
+    return A.tocsc(), bnd
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION VII  ·  PHYSICS SOURCE FUNCTIONS
@@ -557,7 +557,7 @@ def _normalise_psi(psi, bnd):
         return psi
     return (psi - psi_min) / denom
 
-def solve_linear(A_csr, bnd, rmesh, coords):
+def solve_linear(A_csc, bnd, rmesh, coords):
     """
     Single linear solve.  Used for SOLOVIEV_LINEAR (and CUSTOM if source
     has no ψ-dependence).
@@ -571,11 +571,11 @@ def solve_linear(A_csr, bnd, rmesh, coords):
         else:
             b_vec[k] = source_fn(rmesh[ir], 0.0)   # psi_n unused for linear
 
-    psi = spsolve(A_csr, b_vec)
+    psi = spsolve(A_csc, b_vec)
     print(f"  ψ ∈ [{psi.min():.6f}, {psi.max():.6f}]")
     return psi*psi_b
 
-def _picard_step(psi, A_csr, rmesh, coords, bnd):
+def _picard_step(psi, A_csc_lu, rmesh, coords, bnd):
     """One Picard step: evaluate source at current ψ, solve, re-normalise."""
     source_fn = get_source_fn()
     N = len(coords)
@@ -594,16 +594,17 @@ def _picard_step(psi, A_csr, rmesh, coords, bnd):
             pn       = np.clip((psi[k] - psi_min) / denom, 0.0, 1.0)
             b_vec[k] = source_fn(rmesh[ir], pn)
 
-    psi_new = spsolve(A_csr, b_vec)
+    psi_new = A_csc_lu.solve(b_vec)
     return _normalise_psi(psi_new, bnd)
 
-def solve_picard(A_csr, bnd, rmesh, zmesh, coords):
+def solve_picard(A_csc, bnd, rmesh, zmesh, coords):
     """
     Plain Picard iteration  ψ ← P(ψ)  for the nonlinear GS problem.
     The stopping test and the reported diagnostics use the true fixed-point residual ‖P(ψ) − ψ‖/‖ψ‖.
     """
     N = len(coords)
-    P = lambda x: _picard_step(x, A_csr, rmesh, coords, bnd)
+    A_csc_lu = splu(A_csc)
+    P = lambda x: _picard_step(x, A_csc_lu, rmesh, coords, bnd)
     rel = lambda a, b: np.linalg.norm(a - b) / (np.linalg.norm(b) + 1e-15)
     psi = np.zeros(N)
     for k in bnd:
@@ -639,7 +640,7 @@ def solve_picard(A_csr, bnd, rmesh, zmesh, coords):
     nrm = np.linalg.norm(psi)
     def Lv(v):
         eps = 1e-6 * nrm / np.linalg.norm(v)
-        return (_picard_step(psi + eps * v, A_csr, rmesh, coords, bnd) - _picard_step(psi - eps * v, A_csr, rmesh, coords, bnd)) / (2 * eps)
+        return (_picard_step(psi + eps * v, A_csc, rmesh, coords, bnd) - _picard_step(psi - eps * v, A_csc, rmesh, coords, bnd)) / (2 * eps)
 
     N = psi.size
     L_op = LinearOperator((N, N), matvec=Lv, dtype=float)
@@ -674,13 +675,13 @@ def solve():
     node_id, coords = build_index_map(inside)
 
     print("\n[3] Matrix assembly")
-    A_csr, bnd = assemble(rmesh, zmesh, inside, node_id, coords)
+    A_csc, bnd = assemble(rmesh, zmesh, inside, node_id, coords)
 
     print("\n[4] Solving")
     if PHYSICS == 'SOLOVIEV_LINEAR':
-        psi = solve_linear(A_csr, bnd, rmesh, coords)
+        psi = solve_linear(A_csc, bnd, rmesh, coords)
     else:
-        psi = solve_picard(A_csr, bnd, rmesh, zmesh, coords)
+        psi = solve_picard(A_csc, bnd, rmesh, zmesh, coords)
 
     print(f"\n  Total time: {time.time() - t0:.2f}s")
     return psi, rmesh, zmesh, inside, node_id, coords, bnd

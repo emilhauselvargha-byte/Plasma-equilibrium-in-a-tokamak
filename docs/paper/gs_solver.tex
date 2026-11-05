@@ -18,25 +18,27 @@
 \newcommand{\ez}{\hat{\bm{z}}}
 \newcommand{\rhoS}{\rho}
 
-\title{A finite-difference Grad--Shafranov solver\\ on a boundary-fitted non-homogeneous mesh:\\ linear (Solov'ev) benchmark and nonlinear Picard equilibria}
-\author{Emil H.V.}
+\title{A finite-difference Grad--Shafranov solver\\ on a boundary-fitted non-homogeneous mesh:\\ Solov'ev benchmark and nonlinear Picard equilibria}
+\author{Hausel-Vargha Emil}
 \date{\today}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-We document a fixed-boundary Grad--Shafranov (GS) solver written in Python (NumPy/SciPy). The solver follows the finite-difference scheme on a boundary-fitted non-homogeneous mesh of L\'opez, Orozco and Dougar-Zhabon~\cite{lopez2019}, which they validated only for the linear Solov'ev case, and extends it to the general \emph{nonlinear} case with arbitrary $p'(\psi)$ and $FF'(\psi)$ through Picard iteration~\cite{jardin2010}. We describe the mesh construction, the discretisation, the sparse linear algebra and the iteration; we benchmark the linear solve against the analytic Solov'ev equilibrium (observed order of convergence $\approx 1.9$, maximum error $7\times10^{-6}$ on a $233\times233$ grid); we validate the nonlinear code path; we show nonlinear equilibria for several profiles and boundary shapes; and we study the spectrum of the Picard map, whose spectral radius ($0.22$--$0.48$ on the cases tested) predicts the observed $15$--$33$ iterations well. We also record one practical lesson: the profile shapes must be imposed on $p'$ and $FF'$ so that the toroidal current density does not vanish on the magnetic axis; imposing them on $p$ and $F^2$ and differentiating makes plain Picard oscillate on a period-two cycle.
+We built a fixed-boundary Grad--Shafranov (GS) solver written in Python (NumPy/SciPy). The solver follows the finite-difference scheme on a boundary-fitted non-homogeneous mesh of L\'opez, Orozco and Dougar-Zhabon~\cite{lopez2019}, which they validated only for the linear Solov'ev case, and extends it to the general nonlinear case with arbitrary $p'(\psi)$ and $FF'(\psi)$ through Picard iteration~\cite{jardin2010}. We describe the mesh construction, the discretisation, the sparse linear algebra and the iteration; we benchmark the linear solve against the analytic Solov'ev equilibrium (observed order of convergence $\approx 1.9$, maximum error $7\times10^{-6}$ on a $233\times233$ grid); we validate the nonlinear code path; we show nonlinear equilibria for several profiles and boundary shapes; and we study the spectrum of the Picard map, whose spectral radius predicts the observed observed number of iterations well.
 \end{abstract}
+\clearpage
 
 \tableofcontents
 
+\clearpage
 %=====================================================================
 \section{Context}\label{sec:context}
 %=====================================================================
 
 \subsection{What is the Grad--Shafranov equation?}
-In a tokamak, the plasma is confined by a magnetic field that is, to a good approximation, symmetric under rotation about the machine axis. Writing $(r,\varphi,z)$ for cylindrical coordinates and imposing $\partial_\varphi\equiv 0$ on all scalar fields, ideal MHD in \emph{static} equilibrium reduces to
+In a tokamak, the plasma is confined by a magnetic field that is, to a good approximation, symmetric under rotation about the machine axis. Writing $(r,\varphi,z)$ for cylindrical coordinates and imposing $\partial_\varphi\equiv 0$ on all scalar fields, ideal MHD in static equilibrium reduces to
 \begin{equation}
 \bJ\times\bB=\nabla p,\qquad \mu_0\bJ=\nabla\times\bB,\qquad \nabla\cdot\bB=0 .
 \end{equation}
@@ -50,20 +52,19 @@ Force balance forces $p=p(\psi)$ and $f=f(\psi)$, and the remaining component of
 \Dstar\psi:=\frac{\partial^2\psi}{\partial r^2}-\frac1r\frac{\partial\psi}{\partial r}+\frac{\partial^2\psi}{\partial z^2}.
 \label{eq:GS}
 \end{equation}
-It is a two-dimensional, elliptic, in general \emph{nonlinear} PDE for $\psi(r,z)$: it looks like a Poisson problem, but the source depends on the unknown through the two free functions $p(\psi)$ and $FF'(\psi)=\tfrac12 \dd (f^2)/\dd\psi$. A full derivation is given in Appendix~\ref{app:derivation}.
+It is a two-dimensional, elliptic, and (in general) \emph{nonlinear} PDE for $\psi(r,z)$: it looks like a Poisson problem, but the source depends on the unknown through the two free functions $p(\psi)$ and $FF'(\psi)=\tfrac12 \dd (f^2)/\dd\psi$. A full derivation is given in Appendix~\ref{app:derivation}.
 
-\subsection{Why do we care?}
+\subsection{How should we interpret this equation?}
 \begin{itemize}[nosep]
-\item \textbf{Shape of the confinement region.} Level sets of $\psi$ are the magnetic flux surfaces: nested toroidal surfaces on which field lines lie and, to leading order, along which heat and particles flow quickly. The equilibrium tells us where the plasma sits, its elongation and triangularity response, the Shafranov shift of the magnetic axis, and the location of the separatrix and X-points.
-\item \textbf{Starting point for everything else.} The safety factor $q(\psi)$, the shear, the stability of MHD modes (ballooning, kink, tearing), transport codes, particle-orbit studies and heating/current-drive calculations all take an equilibrium as input.
-\item \textbf{Operation and design.} Real-time reconstruction codes solve GS from magnetic measurements to control the plasma shape; design studies use it to explore shapes and profile scenarios before building anything.
-\item \textbf{A cheap but rich numerical problem.} It is nonlinear, elliptic and posed on a non-trivial domain, which makes it a good testbed for meshing, sparse solvers and nonlinear iteration.
+\item \textbf{Shape of the confinement region.} Level sets of $\psi$ are the magnetic flux surfaces. These are toroidal surfaces on which field lines lie and, to leading order, along which heat and particles flow quickly. The equilibrium describes where the plasma sits, its elongation and triangularity, and the Shafranov shift of the magnetic axis. 
+\item \textbf{Operation, design.} Real-time reconstruction codes solve GS from magnetic measurements to control the plasma shape; design studies use it to explore shapes and profile scenarios before building anything.
+\item \textbf{Physics.} The GS solution gives the current density $\bJ$ and the magnetic field $\bB$, which are used to compute the safety factor $q(\psi)$, the magnetic shear, the Shafranov shift, and other quantities that enter stability and transport calculations.
 \end{itemize}
 
 \subsection{Fixed versus free boundary, direct versus inverse}
-\paragraph{Fixed boundary.} The last closed flux surface is \emph{prescribed} (here by a parametric D-shape, or by a Solov'ev contour), $\psi=\psi_b$ is imposed on it, and \eqref{eq:GS} is solved only inside. The exterior is irrelevant. Choosing the profiles $p(\psi)$, $FF'(\psi)$ and the shape then gives $\psi$, and in a real device the pressure profile and toroidal field are controllable to a good extent, so scanning shape and profile weights is an inexpensive way to build intuition. This is the problem treated here.
-\paragraph{Free boundary.} The plasma is surrounded by external coils; $\Dstar\psi$ is solved on a large computational box with the coil currents as sources, and the plasma boundary is \emph{part of the solution} (the contour through the X-point or touching the limiter). At each iteration the boundary is recomputed, which captures the natural plasma displacement and gives a much more physical description, at the price of significantly more machinery (Green's functions for the vacuum region, boundary tracking, X-point search, coupling to circuit equations).
-\paragraph{Inverse (reconstruction) problems.} Given measurements (e.g.\ magnetic probes on JET), one fits $p'$ and $FF'$ parametrically so that the GS solution matches the data; this is how $p(\psi)$ and $f(\psi)$ are deduced from experiment.
+\paragraph{Fixed boundary.} The last closed flux surface is prescribed (here by a parametric D-shape, or by a Solov'ev contour), $\psi=\psi_b$ is imposed on it, and \eqref{eq:GS} is solved only inside. The exterior is irrelevant. Choosing the profiles $p(\psi)$, $FF'(\psi)$ and the shape then gives $\psi$, and in a real device the pressure profile and toroidal field are controllable to a good extent, so scanning shape and profile weights is an inexpensive way to build intuition. This is the problem treated here.
+\paragraph{Free boundary.} The plasma is surrounded by external coils; $\Dstar\psi$ is solved on a large computational box with the coil currents as sources, and the plasma boundary is actually \emph{part of the solution} (the contour through the X-point or touching the limiter). At each iteration the boundary is recomputed, which captures the natural plasma displacement and gives a much more physical description, at the price of significantly more machinery.
+\paragraph{Inverse problems.} Given measurements (e.g.\ magnetic probes on JET), one fits $p'$ and $FF'$ parametrically so that the GS solution matches the data; this is how $p(\psi)$ and $f(\psi)$ are deduced from experiment.
 
 \subsection{Scope of this work}
 The reference for the numerical scheme is L\'opez \emph{et al.}~\cite{lopez2019}: a fixed-boundary, D-shaped, finite-difference solver on a non-homogeneous mesh, with SOR iteration, validated against the Solov'ev solution. Their validation is a \emph{linear} problem (the right-hand side is a fixed function of position). Here we reproduce that benchmark and then go further: the code also handles the \emph{nonlinear} source $S(r,\psi)$ for arbitrary $p'(\psi)$, $FF'(\psi)$, via a Picard iteration, and we analyse the behaviour of that iteration.
@@ -71,7 +72,7 @@ The reference for the numerical scheme is L\'opez \emph{et al.}~\cite{lopez2019}
 %=====================================================================
 \section{The solver}\label{sec:solver}
 %=====================================================================
-All code is in \texttt{src/gs\_solver.py}; the optional diagnostics used in Section~\ref{sec:picard} are in \texttt{src/gs\_fixedpoint.py}. The solver has three interchangeable modes: \texttt{SOLOVIEV\_LINEAR} (one linear solve), \texttt{PICARD\_NONLINEAR} (the general case) and \texttt{CUSTOM} (user-supplied source), combined with either of two boundary geometries.
+All code is in \texttt{src/gs\_solver.py}; the optional diagnostics used in Section~\ref{sec:picard} are in \texttt{src/gs\_fixedpoint.py}. The solver has three interchangeable modes: \texttt{SOLOVIEV\_LINEAR} (one linear solve), \texttt{PICARD\_NONLINEAR} (the general case) and \texttt{CUSTOM} (custom source), combined with either of two boundary geometries.
 
 \subsection{Problem set-up and normalisation}
 Lengths are normalised to the major radius $R_0$. With the flux normalised to
@@ -87,7 +88,7 @@ The second condition exploits up--down symmetry: only the upper half-plane $z\ge
 
 \paragraph{Boundary geometries.}
 \begin{itemize}[nosep]
-\item \emph{Shafranov (parametric, Miller-type)}: $R(t)=R_0+a\cos\!\big(t+\delta\sin t\big)$, $Z(t)=\kappa a\sin t$, with minor radius $a$, triangularity $\delta$ and elongation $\kappa$.
+\item \emph{Shafranov} (parametric, as in Troyon et al. \cite{troyon1984}): $R(t)=R_0+a\cos\!\big(t+\delta\sin t\big)$, $Z(t)=\kappa a\sin t$, with minor radius $a$, triangularity $\delta$ and elongation $\kappa$.
 \item \emph{Solov'ev}: the closed D-shaped contour $Z^2(R)=\big[a_s-b(R^2-R_0^2)^2\big]/R^2$ with $b=\kappa_0^2/4$, $a_s=2R_0^2\kappa_0 q_0\psi_b/B_0$ (parameters $\kappa_0,q_0,B_0$ as in~\cite{lopez2019}). It is the $\psi=\psi_b$ level set of the exact solution, so the boundary and the source are consistent.
 \end{itemize}
 
@@ -96,25 +97,25 @@ The second condition exploits up--down symmetry: only the upper half-plane $z\ge
 -\frac{\dd p}{\dd\pn}=p_0\,(1-\pn^{s_{p1}})^{s_{p2}},\qquad
 -\frac{\dd (F^2)}{\dd\pn}=\alpha\,(1-\pn^{s_{f1}})^{s_{f2}},
 \end{equation}
-both equal to $1$ (times the amplitude) on the axis and to $0$ on the boundary; the exponents control how peaked or broad the profiles are. With $FF'=\tfrac12\,\dd(F^2)/\dd\psi$ the normalised source is
+Their values therefore vary respectively between the amplitudes $p_0$ and $\alpha$ on the axis and $0$ on the boundary; the exponents control how peaked or broad the profiles are. With $FF'=\tfrac12\,\dd(F^2)/\dd\psi$ the normalised source is
 \begin{equation}
 S(r,\pn)=-r^2\frac{\dd p}{\dd\pn}-\frac12\frac{\dd (F^2)}{\dd\pn}=r^2p_0\,(1-\pn^{s_{p1}})^{s_{p2}}+\frac{\alpha}{2}(1-\pn^{s_{f1}})^{s_{f2}}\;\ge 0 .
 \label{eq:picardsrc}
 \end{equation}
-The sign matters: $S\ge0$ means $\Dstar\psi\ge0$, so $\psi$ is smallest in the interior (the magnetic axis) and increases towards the boundary, consistent with $\pn=0$ on the axis; with $S<0$ the ``minimum'' that the code identifies as the axis lands on the boundary. The toroidal current density is $\mu_0rJ_\varphi=-S$, so, since $S$ does not vanish at $\pn=0$, the current density is non-zero on the axis (a peaked-current scenario; hollow-current configurations are outside the scope of this work). Note that $\mu_0J_\varphi\propto S/r=rp_0\,p_{\rm shape}+\tfrac{\alpha}{2r}f^2_{\rm shape}$: the $1/r$ and $r$ factors move the maximum of $J_\varphi$ off the axis towards the outboard or inboard side depending on $p_0/\alpha$ (Fig.~\ref{fig:diag}).
+The sign matters: $S\ge0$ means $\Dstar\psi\ge0$, so $\psi$ is smallest in the interior (the magnetic axis) and increases towards the boundary, consistent with $\pn=0$ on the axis; with $S<0$ the ``minimum'' that the code identifies as the axis lands on the boundary. The toroidal current density is $\mu_0rJ_\varphi=-S$, so, since $S$ does not vanish at $\pn=0$, the current density is non-zero on the axis. Note that $\mu_0J_\varphi\propto S/r=rp_0\,p_{\rm shape}+\tfrac{\alpha}{2r}f^2_{\rm shape}$: the $1/r$ and $r$ factors move the maximum of $J_\varphi$ off the axis towards the outboard or inboard side depending on $p_0/\alpha$ (Fig.~\ref{fig:diag}).
 
-\paragraph{Why the shapes are on the derivatives.} L\'opez \emph{et al.}\ write the profiles as $p=p_0\tilde p(\pn)$ and similar for $f^2$, i.e.\ with shape functions on $p$ and $f^2$ themselves. Imposing the shapes $(1-\pn^{a})^{b}$ on $p$ and differentiating makes $p'$ vanish on the axis for $a\ge2$, hence a vanishing source and a hollow current profile there, and in our experiments plain Picard then does not converge (Section~\ref{sec:param}). Shaping $p'$ and $FF'$ directly avoids the issue. 
+\paragraph{Why the shapes are on the derivatives.} L\'opez \emph{et al.}\ write the profiles as $p=p_0\tilde p(\pn)$ and similar for $f^2$, i.e.\ with shape functions on $p$ and $f^2$ themselves. Imposing the shapes $(1-\pn^{a})^{b}$ on $p$ and differentiating makes $p'$ vanish on the axis for $a\ge2$, hence a vanishing source and a hollow current profile there, and in our experiments plain Picard then does not converge. Shaping $p'$ and $FF'$ directly avoids the issue. 
 
 For the linear Solov'ev mode the source is the position-only function $S=(8b+2)\,r^2/a_s$, whose exact solution is $\psi(r,z)=\psi_b\,[\,b(r^2-R_0^2)^2+r^2z^2\,]/a_s$~\cite{lopez2019}.
 
 \subsection{Inhomogeneous, boundary-fitted mesh}
-A uniform Cartesian grid represents a curved boundary badly (staircase errors of order $h$ unless special near-boundary stencils are used). Following~\cite{lopez2019}, the grid is instead built so that boundary points \emph{are} grid nodes. Figure~\ref{fig:mesh} shows the result for both geometries.
+A uniform Cartesian grid represents a curved boundary badly (staircase errors of order $h$ unless special near-boundary stencils are used). Following~\cite{lopez2019}, the grid is instead built so that boundary points \emph{are} grid nodes. Fig ~\ref{fig:mesh} shows the resulting mesh for both geometries.
 \begin{enumerate}[nosep]
 \item \textbf{Outer boundary at constant arc length.} Starting at the outboard midplane ($Z=0$) the boundary is walked towards the top, placing points at (approximately) constant arc-length spacing $\Delta s$. Given the last point $(R_k,Z_k)$ the next one solves $f(\tau)=\|\bm x(\tau)-\bm x_k\|^2-\Delta s^2=0$ in the curve parameter $\tau$ (Newton with a Brent fallback), as in L\'opez's Eq.~(18). The sampled heights $z_k$ define the $z$-mesh.
 \item \textbf{Inner boundary at the same heights.} For every $z_k$ the radius of the inner (high-field-side) boundary is found by one-dimensional root finding.
 \item \textbf{Tensor grid and mask.} The $R$-mesh is the union of all inner and outer boundary radii; the grid is the tensor product $R$-mesh $\times$ $z$-mesh, and a node is \emph{active} if it lies between the inner and outer radius of its row. Row by row, the first and last active nodes therefore sit exactly on the boundary.
 \end{enumerate}
-The mesh is non-uniform in both directions (finer where the boundary curves strongly), and $\Delta s$ is the single resolution knob. The number of unknowns is $N\sim 10^2$--$10^4$ in the experiments below.
+The mesh is non-uniform in both directions, and $\Delta s$ is used as the resolution knob. It is denser where the boundary curves strongly. The number of unknowns is $N\sim 10^2$--$10^4$ in the experiments below.
 
 \begin{figure}[t]
 \centering
@@ -125,32 +126,151 @@ The mesh is non-uniform in both directions (finer where the boundary curves stro
 \end{figure}
 
 \subsection{Finite-difference discretisation}
-On a non-uniform 3-point stencil with $h_+=x_{i+1}-x_i$, $h_-=x_i-x_{i-1}$ and $h_s=h_++h_-$, the second-order accurate approximations are
-\begin{align}
-f''_i&\approx\frac{2}{h_s}\left[\frac{f_{i+1}-f_i}{h_+}+\frac{f_{i-1}-f_i}{h_-}\right],\\
-f'_i&\approx\frac{h_-^2\,(f_{i+1}-f_i)-h_+^2\,(f_{i-1}-f_i)}{h_+h_-h_s}.
-\end{align}
-(The leading truncation error of the first-derivative formula is $\tfrac16h_+h_-f'''$, so it is second order in the local mesh size; the second-derivative formula is first order at nodes with $h_+\neq h_-$ and second order on smoothly graded meshes, which is the case here.) Applying these in $r$ for $\partial_r^2-\tfrac1r\partial_r$ and in $z$ for $\partial_z^2$ gives, at an interior node $(i,j)$ with $r=r_i$,
+
+To derive the second-order finite-difference approximation on a non-uniform
+3-point stencil, we define
+\[
+\delta x_i=x_{i+1}-x_i,
+\qquad
+\delta x_{i-1}=x_i-x_{i-1},
+\qquad
+\delta x_s=\delta x_i+\delta x_{i-1}.
+\]
+
+\textbf{First derivative.}
+First, we use second-order Taylor expansions to write
 \begin{equation}
-\Dstar\psi\big|_{ij}\approx c_{R+}\psi_{i+1,j}+c_{R-}\psi_{i-1,j}+c_{Z+}\psi_{i,j+1}+c_{Z-}\psi_{i,j-1}+c_0\psi_{ij},
+    f(x_i+\delta x_i)
+    \approx
+    f(x_i)
+    +f'(x_i)\delta x_i
+    +\frac{1}{2}f''(x_i)\delta x_i^2,
 \end{equation}
-with, in terms of $h_\pm^{(r)}$, $h_s^{(r)}$ and $h_\pm^{(z)}$, $h_s^{(z)}$,
+and
+\begin{equation}
+    f(x_i-\delta x_{i-1})
+    \approx
+    f(x_i)
+    -f'(x_i)\delta x_{i-1}
+    +\frac{1}{2}f''(x_i)\delta x_{i-1}^2.
+\end{equation}
+
+where t $x_i+\delta x_i=x_{i+1}$ and
+$x_i-\delta x_{i-1}=x_{i-1}$. Multiplying the first equation by
+$\delta x_{i-1}^2$ and the second by $\delta x_i^2$, and then
+subtracting the second equation from the first, yields
+\begin{equation}
+    \delta x_{i-1}^2 f(x_{i+1})
+    -\delta x_i^2 f(x_{i-1})
+    =
+    f(x_i)
+    \left(\delta x_{i-1}^2-\delta x_i^2\right)
+    +
+    f'(x_i)\delta x_i\delta x_{i-1}\delta x_s.
+\end{equation}
+
+Finally, rearranging for $f'(x_i)$ gives
+\begin{equation}
+    f'(x_i)
+    =
+    \frac{
+        \delta x_{i-1}^2
+        \left[f(x_{i+1})-f(x_i)\right]
+        -
+        \delta x_i^2
+        \left[f(x_{i-1})-f(x_i)\right]
+    }{
+        \delta x_i\delta x_{i-1}\delta x_s
+    }.
+\end{equation}
+
+\textbf{Second derivative.}
+The same procedure is used to obtain the approximation for the second
+derivative. Using the same Taylor expansions as above and eliminating
+the first derivative before rearranging gives
+\begin{equation}
+    f''(x_i)
+    =
+    \frac{
+        \delta x_{i-1}
+        \left[f(x_{i+1})-f(x_i)\right]
+        +
+        \delta x_i
+        \left[f(x_{i-1})-f(x_i)\right]
+    }{
+        \frac{1}{2}\delta x_i\delta x_{i-1}\delta x_s
+    },
+\end{equation}
+as in Lopez et al.~\cite{lopez2019}.
+
+Applying these approximations in the $r$-direction for
+$\partial_r^2-\tfrac{1}{r}\partial_r$ and in the $z$-direction for
+$\partial_z^2$ gives, at an interior node $(i,j)$ with $r=r_i$,
+\begin{equation}
+    \Dstar\psi\big|_{ij}
+    \approx
+    c_{R+}\psi_{i+1,j}
+    +c_{R-}\psi_{i-1,j}
+    +c_{Z+}\psi_{i,j+1}
+    +c_{Z-}\psi_{i,j-1}
+    +c_0\psi_{ij},
+\end{equation}
+where
 \begin{align*}
-c_{R+}&=\frac{2}{h^{(r)}_+h^{(r)}_s}-\frac{(h^{(r)}_-)^2}{r\,h^{(r)}_+h^{(r)}_-h^{(r)}_s}, &
-c_{R-}&=\frac{2}{h^{(r)}_-h^{(r)}_s}+\frac{(h^{(r)}_+)^2}{r\,h^{(r)}_+h^{(r)}_-h^{(r)}_s},\\
-c_{Z\pm}&=\frac{2}{h^{(z)}_\pm h^{(z)}_s}, &
-c_0&=-\frac{2}{h^{(r)}_+h^{(r)}_-}+\frac{(h^{(r)}_-)^2-(h^{(r)}_+)^2}{r\,h^{(r)}_+h^{(r)}_-h^{(r)}_s}-\frac{2}{h^{(z)}_+h^{(z)}_-}.
+    c_{R+}
+    &=
+    \frac{2}{\delta r_i\delta r_s}
+    -
+    \frac{\delta r_{i-1}}
+    {r\,\delta r_i\delta r_s},
+    &
+    c_{R-}
+    &=
+    \frac{2}{\delta r_{i-1}\delta r_s}
+    +
+    \frac{\delta r_i}
+    {r\,\delta r_{i-1}\delta r_s},
+    \\[6pt]
+    c_{Z+}
+    &=
+    \frac{2}{\delta z_j\delta z_s},
+    &
+    c_{Z-}
+    &=
+    \frac{2}{\delta z_{j-1}\delta z_s},
+    \\[6pt]
+    c_0
+    &=
+    -\frac{2}{\delta r_i\delta r_{i-1}}
+    +
+    \frac{
+        \delta r_{i-1}^2-\delta r_i^2
+    }{
+        r\,\delta r_i\delta r_{i-1}\delta r_s
+    }
+    -
+    \frac{2}{\delta z_j\delta z_{j-1}},
 \end{align*}
-This is the same structure as L\'opez's Eq.~(14), written for the operator in the form used in this code.
+where
+\[
+\delta r_s=\delta r_i+\delta r_{i-1},
+\qquad
+\delta z_s=\delta z_j+\delta z_{j-1}.
+\]
+
+This is the same structure as Lopez's Eq.~(14), written for the $\Delta^*$ operator
+in the form used in this code.
+
+
 
 \paragraph{Boundary conditions.}
 \begin{itemize}[nosep]
-\item \emph{Midplane} ($z=0$, symmetry): a ghost value $\psi_{i,-1}=\psi_{i,1}$ gives $\partial_z^2\psi|_{z=0}\approx 2(\psi_{i,1}-\psi_{i,0})/(h^{(z)}_+)^2$.
-\item \emph{Boundary}: a node is \emph{Dirichlet} ($\psi=\psi_b$, which is $1$ in normalised units) if it is on the top row, or has a missing active neighbour in the $r$-direction (inner/outer wall), or a missing neighbour in $z$ (except at the midplane, where the ghost value is used). Dirichlet rows of the matrix are identity rows. Because the grid lines pass through the boundary points in $R$, the radial condition is imposed exactly; a node whose vertical neighbour is missing is, however, assigned the boundary value even though it lies slightly inside the boundary in $z$, which is the main source of the discretisation error discussed in Section~\ref{sec:bench}.
+\item \emph{Midplane} ($z=0$, symmetry): a ghost value $\psi_{i,-1}=\psi_{i,1}$ gives $\partial_z^2\psi|_{z=0}\approx 2(\psi_{i,1}-\psi_{i,0})/\delta z_i^2$.
+\item \emph{Boundary}: a node is \emph{Dirichlet} ($\psi=\psi_b$, or simply $1$ in normalised units) if it is on the top row, or has a missing active neighbour in the $r$-direction (inner/outer wall), or a missing neighbour in $z$ (except at the midplane, where the ghost value is used). Dirichlet rows of the matrix are identity rows. Because the grid lines pass through the boundary points in $R$, the radial condition is imposed exactly; a node whose vertical neighbour is missing is, however, assigned the boundary value even though it lies slightly inside the boundary in $z$, which is the main source of the discretisation error discussed in Section~\ref{sec:bench}.
 \end{itemize}
 
 \subsection{Sparse linear algebra}
-Collecting the active nodes in a single index $k$ gives a linear system $A\bm\psi=\bm b$, where $A\in\mathbb R^{N\times N}$ has at most five non-zeros per row. It is assembled in LIL format (cheap incremental insertion), converted to CSR, and solved with \texttt{scipy.sparse.linalg.spsolve} (sparse LU, SuperLU). Dirichlet rows read $\psi_k=1$ with $b_k=1$; interior rows read $(A\bm\psi)_k=S_k$. For Solov'ev, a single solve ($\approx 0.1$\,s for $N\approx6000$) is enough. The matrix does \emph{not} depend on $\bm\psi$ in the nonlinear case, only the right-hand side does; the present code nevertheless refactorises at each Picard step, so an easy speed-up is to compute one \texttt{splu} factorisation and reuse it.
+Collecting the active nodes in a single index $k$ gives a linear system $A\bm\psi=\bm b$, where $A\in\mathbb R^{N\times N}$ has at most five non-zeros per row. It is assembled in LIL format (cheap incremental insertion), converted to CSC, and solved with \texttt{scipy.sparse.linalg.spsolve} (sparse LU, SuperLU). Dirichlet rows read $\psi_k=1$ with $b_k=1$; interior rows read $(A\bm\psi)_k=S_k$. For Solov'ev, a single solve ($\approx 0.1$\,s for $N\approx6000$) is enough. The matrix does not depend on $\bm\psi$ in the nonlinear case, only the right-hand side does; for the nonlinear case, the code therefore computes a single \texttt{splu} factorization and reuses it for the subsequent solves. 
 
 \subsection{Picard iteration for the nonlinear case}\label{sec:picarddef}
 For the nonlinear source, one step of the iteration is a map $P:\bm\psi\mapsto\bm\psi^{+}$ defined as
@@ -173,21 +293,21 @@ The geometry is validated at start-up: the Shafranov boundary requires $a<R_0$, 
 %=====================================================================
 
 \subsection{Benchmark against the Solov'ev solution}\label{sec:bench}
-We use the parameters of~\cite{lopez2019}: $B_0=0.5$\,T, $R_0=0.95$, $\kappa_0=2.2$, $q_0=1.1$, $\psi_b=0.09$, on the Solov'ev contour, in mode \texttt{SOLOVIEV\_LINEAR}. Figure~\ref{fig:soloviev} shows the numerical and exact fluxes and their difference for $\Delta s=0.02$ ($N=5041$ unknowns, a $141\times71$ tensor grid of which every active node is used): the maximum error is $1.9\times10^{-5}$ and the mean error $4.7\times10^{-6}$, i.e.\ $2\times10^{-4}$ relative to the peak value of $\psi$. The error is largest around the magnetic axis and decays towards the boundary, where $\psi$ is prescribed.
+We use the parameters of~\cite{lopez2019}: $B_0=0.5$\,T, $R_0=0.95$, $\kappa_0=2.2$, $q_0=1.1$, $\psi_b=0.09$, on the Solov'ev contour, in mode \texttt{SOLOVIEV\_LINEAR}. Figure~\ref{fig:soloviev} shows the numerical and exact fluxes and their difference for our finest run, $\Delta s=0.006$, which has a $465\times233$ tensor grid in the upper half-plane and $54{,}289$ unknowns there (about $108{,}000$ over the full cross-section). The maximum error is $1.77\times10^{-6}$ and the mean error $4.45\times10^{-7}$, i.e.\ $2\times10^{-5}$ of the peak value of $\psi$. The error is largest around the magnetic axis and decays towards the boundary, where $\psi$ is prescribed.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\textwidth]{soloviev_benchmark.png}
-\caption{Linear Solov'ev benchmark, $\Delta s=0.02$. Left: numerical $\psi$; middle: analytic $\psi$; right: absolute error.}
+\caption{Linear Solov'ev benchmark, $\Delta s=0.006$. Left: numerical $\psi$; middle: analytic $\psi$; right: absolute error.}
 \label{fig:soloviev}
 \end{figure}
 
-\paragraph{Grid convergence.}
-Table~\ref{tab:conv} and Figure~\ref{fig:conv} show the error as the boundary step $\Delta s$ is refined. A least-squares fit on the log--log data gives an observed order of $1.88$ (max norm) and $1.79$ (mean), i.e.\ close to the second order expected for the stencils. The slightly sub-quadratic max-norm slope is consistent with the first-order treatment of the vertical boundary condition noted above. For reference, L\'opez \emph{et al.} report on a $241\times241$ mesh an error along the $r$ axis that does not exceed $10^{-5}$ (their Fig.~4c). Our run at $\Delta s=0.012$ ($233\times233$ tensor grid, $N=13689$ active nodes) has a maximum error of $7.0\times10^{-6}$ over the whole grid, which is of the same order and slightly below that bound at comparable resolution; we have not reproduced their SOR iteration and the comparison is only as precise as their one-line statement.
+\paragraph{Grid convergence and comparison with L\'opez \emph{et al.}}
+Table~\ref{tab:conv} and Figure~\ref{fig:conv} show the error as the boundary step $\Delta s$ is refined. A least-squares fit on the log--log data gives an observed order of $1.90$ (max norm) and $1.83$ (mean), and $1.97$ and $1.93$ over the four finest runs, i.e.\ the second order expected for the stencils. L\'opez \emph{et al.}\ report, for a ``meshgrid of $241\times241$ points'', an error along the $r$ axis that does not exceed $10^{-5}$ (their Fig.~4c). They do not say whether this counts the tensor grid or the active nodes, so we compare with both: our run at $\Delta s=0.012$ has a $233\times233$ tensor grid over the whole domain and a maximum error of $7.0\times10^{-6}$, and our run at $\Delta s=0.0083$ has about $57{,}000$ active nodes over the full cross-section (comparable to $241^2$) and a maximum error of $3.4\times10^{-6}$. In both cases the error lies below their stated bound, although the comparison depends on the way in which nodes are counted and is made only for reference.
 
 \begin{table}[h]
 \centering
-\caption{Solov'ev grid-convergence study (error in $\psi$ in the units of $\psi_b=0.09$).}
+\caption{Solov'ev grid-convergence study for large $\Delta s$ (error in $\psi$ in the units of $\psi_b=0.09$). $N$ denotes the number of active nodes in the upper half-plane.}
 \label{tab:conv}
 \begin{tabular}{rrcc}
 \toprule
@@ -202,6 +322,8 @@ $\Delta s$ & $N$ & max error & mean error\\
 0.025 & 3249 & $2.94\times10^{-5}$ & $7.14\times10^{-6}$\\
 0.018 & 6241 & $1.53\times10^{-5}$ & $3.72\times10^{-6}$\\
 0.012 & 13689 & $6.99\times10^{-6}$ & $1.74\times10^{-6}$\\
+0.0083 & 28561 & $3.36\times10^{-6}$ & $8.40\times10^{-7}$\\
+0.006  & 54289 & $1.77\times10^{-6}$ & $4.45\times10^{-7}$\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -219,7 +341,7 @@ There is no analytic solution for a generic nonlinear source, so the nonlinear p
 \paragraph{Grid convergence of a nonlinear case.} For the ITER-like boundary with baseline profiles we track the amplitude functional $C=1-u_{\min}$ (the flux difference between boundary and axis in the unnormalised solve at the fixed point) for $N=144$ up to $6889$. It converges, from $0.16780$ to $0.16729$, with a fit $C(\Delta s)=C_\infty+c\,\Delta s^{p}$ giving $C_\infty=0.16723$ and $p\approx1.2$; the plain iteration needs $27$--$28$ iterations at every resolution and the residual is $<4\times10^{-13}$ throughout. The observed order is closer to one than to two, consistent with the first-order treatment of the vertical boundary condition and with non-nested meshes. We therefore claim convergence, but not second-order accuracy, for the nonlinear solutions.
 
 \subsection{Nonlinear equilibria: profiles and shapes}\label{sec:profiles}
-We use the Shafranov boundary with $R_0=0.95$, $a=0.6$ ($a/R_0=0.63$), $\Delta s=0.05$, and plain Picard iteration. Baseline exponents are $(s_{p1},s_{p2})=(2,2)$, $(s_{f1},s_{f2})=(2,1)$ and $p_0=\alpha=1$. We first vary the boundary shape, then the profiles at the ITER-like shape $\kappa=1.7$, $\delta=0.33$. Table~\ref{tab:nl} lists the iterations needed, the fixed-point residual, the position of the magnetic axis (parabolic interpolation through the three midplane nodes around the minimum) and its displacement from the geometric centre of the midplane chord, normalised by the half-width of that chord.
+We use the Shafranov boundary with $R_0=0.95$, $a=0.6$ ($a/R_0=0.63$), $\Delta s=0.05$, and plain Picard iteration. Baseline exponents are $(s_{p1},s_{p2})=(2,2)$, $(s_{f1},s_{f2})=(2,1)$ and $p_0=\alpha=1$. We first vary the boundary shape, then the profiles at the ITER-like shape $\kappa=1.7$, $\delta=0.33$. Table~\ref{tab:nl} lists the iterations needed, the fixed-point residual, the position of the magnetic axis and its displacement from the geometric centre of the midplane chord, normalised by its half-width. The axis is computed by parabolic interpolation through the three midplane nodes around the minimum.
 
 \begin{table}[h]
 \centering
@@ -263,11 +385,15 @@ pressure-driven, $p_0{=}3,\ \alpha{=}0.3$ & (1.7, 0.33) & 961 & 25 & $3.7\times1
 \label{fig:diag}
 \end{figure}
 
-\paragraph{What the cases show.}
+\paragraph{Observations}
 \begin{itemize}[nosep]
-\item \emph{Toroidicity shifts the axis outward even for a circular boundary.} The circular case is not symmetric under $R\to2R_0-R$ (the operator contains $1/R$), and the axis sits at $+0.28$ half-widths outward of the geometric centre. This is the Shafranov shift: the flux surfaces are compressed on the outboard side and the axis moves outward relative to the centre of the boundary. Increasing the shaping to $\kappa=1.7,\delta=0.33$ or to $\kappa=3,\delta=0.8$ changes the normalised shift only slightly ($0.275\to0.240\to0.238$), while the surfaces follow the D-shape (Fig.~\ref{fig:shapes}).
-\item \emph{The shift is controlled by the pressure-to-current ratio, not by the peaking of $p'$.} At fixed ratio $p_0/\alpha=1$, changing the exponents (peaked, baseline or broad $p'$ and $FF'$) moves the shift only between $0.232$ and $0.240$. In contrast, the ratio does the work: $p_0/\alpha=0.1$ gives $0.124$ and $p_0/\alpha=10$ gives $0.300$, a factor $2.4$. This is consistent with the dependence of the Shafranov shift on poloidal beta: more pressure support relative to the poloidal-field-producing current pushes the axis outward.
-\item \emph{The current density profile follows suit.} Because $J_\varphi\propto S/R$ and the pressure term of $S$ carries a factor $R^2$, the midplane current density peaks outboard of the axis for pressure-driven profiles and inboard for current-driven ones (Fig.~\ref{fig:diag}, third panel), but it never vanishes on the axis.
+\item \emph{The axis shifts outward even for a circular boundary.} The circular case is not symmetric under $R\to2R_0-R$. At first glance this may be surprising, but in fact it is expected because the $\Delta^*$ operator contains a $1/R$ term due to the toroidal geometry. The axis sits at $+0.28$ half-widths outward of the geometric centre. This is the Shafranov shift, as the flux surfaces are compressed on the outboard side and the axis moves outward relative to the centre of the boundary. Increasing the shaping to $\kappa=1.7,\delta=0.33$ or to $\kappa=3,\delta=0.8$ changes the normalised shift only slightly ($0.275\to0.240\to0.238$), while the surfaces follow the D-shape (Fig.~\ref{fig:shapes}).
+\item \emph{The shift is controlled by the pressure-to-current ratio.} The shift is in fact not strongly controlled by the peaking of the $p'$ or $FF'$ functions. At fixed ratio $p_0/\alpha=1$, changing the exponents (peaked, baseline or broad $p'$ and $FF'$) moves the shift only between $0.232$ and $0.240$. Rather, it is controlled by their ratio: $p_0/\alpha=0.1$ gives a shift of $0.124$ and $p_0/\alpha=10$ gives $0.300$, a factor $2.4$. This is consistent with the dependence of the Shafranov shift on poloidal beta, as more pressure support relative to the poloidal-field-producing current pushes the axis outward.
+\item \emph{The current density profile follows suit.} Since $\mu_0J_\varphi=-S/R$ and $S=-\mu_0R^2p'-FF'$, the current density is
+\begin{equation*}
+J_\varphi\propto R\,(-p')+\frac{1}{R}\,(-FF'),
+\end{equation*}
+where the pressure term grows with $R$ and the toroidal-field term decays with it. The midplane current density therefore peaks outboard of the axis for pressure-driven profiles and inboard for toroidal-field-driven ones (Fig.~\ref{fig:diag}, third panel).
 \item \emph{Cost.} All cases converge to residuals of $10^{-11}$ in $15$--$30$ plain Picard iterations; broader profiles converge fastest (spectral radius $0.22$ versus $0.44$ for the peaked $p'$; Table~\ref{tab:spec}).
 \end{itemize}
 
@@ -276,7 +402,9 @@ pressure-driven, $p_0{=}3,\ \alpha{=}0.3$ & (1.7, 0.33) & 961 & 25 & $3.7\times1
 %=====================================================================
 
 \subsection{Linear stability}
-Let $P$ be the one-step Picard map of Section~\ref{sec:picarddef}, $\bm\psi^*$ a fixed point and $L=\partial P/\partial\bm\psi|_{\bm\psi^*}$ its Jacobian. Near $\bm\psi^*$ the error evolves as $\bm e^{k+1}\approx L\bm e^k$, so plain Picard converges if and only if the spectral radius $\rho(L)<1$, with asymptotic rate $\rho(L)$ per iteration; reducing the residual by a factor $\varepsilon$ takes about $\ln\varepsilon/\ln\rho(L)$ iterations. We build $L$ column by column by central differences, $L\bm e_j\approx[P(\bm\psi^*+\eta\bm e_j)-P(\bm\psi^*-\eta\bm e_j)]/2\eta$ with $\eta=10^{-6}\|\bm\psi^*\|$, and diagonalise it densely (grids up to $N\approx10^3$). For larger grids the code can instead estimate the leading eigenvalues matrix-free with \texttt{scipy.sparse.linalg.eigs} (\texttt{SPECTRAL\_ANALYSIS}).
+Let $P$ be the one-step Picard map of Section~\ref{sec:picarddef}, $\bm\psi^*$ a fixed point and $L=\partial P/\partial\bm\psi|_{\bm\psi^*}$ its Jacobian. Near $\bm\psi^*$ the error evolves as $\bm e^{k+1}\approx L\bm e^k$, so plain Picard converges if and only if the spectral radius $\rho(L)<1$, with asymptotic rate $\rho(L)$ per iteration; reducing the residual by a factor $\varepsilon$ takes about $\ln\varepsilon/\ln\rho(L)$ iterations. 
+We build $L$ column by column by central differences, 
+$$L\bm e_j\approx\frac{P(\bm\psi^*+\eta\bm e_j)-P(\bm\psi^*-\eta\bm e_j)}{2\eta}$$ with $\eta=10^{-6}\|\bm\psi^*\|$. For smaller grids (up to $N\approx10^3$), we diagonalise it densely. For larger grids the code can instead estimate the leading eigenvalues matrix-free with \texttt{scipy.sparse.linalg.eigs} (\texttt{SPECTRAL\_ANALYSIS}).
 
 \subsection{Measurements}
 All numbers below come from \texttt{scripts/spectral\_study.py} (output in \texttt{results/spectral\_study.json}).
@@ -312,111 +440,171 @@ peaked $p'$                      & 484 & 29 & 0.437\\
 
 \paragraph{Reading.} With peaked-current profiles the Jacobian has a real, non-negative spectrum inside $[0,0.5)$, so plain Picard converges monotonically with rate $0.22$--$0.48$ in all seven configurations tested, and $\rho(L)$ predicts the iteration count well. Broader profiles converge fastest; strong shaping and peaked $p'$ slowest. We have not tested hollow-current, high-beta or very strongly shaped profiles, where the spectrum could look different.
 
-\subsection{Profile parametrisation: why the shapes are on $p'$ and $FF'$}\label{sec:param}
-\texttt{scripts/profile\_parametrisation\_check.py} runs plain Picard on the ITER-like boundary for sources built in different ways (Table~\ref{tab:param}). When the shapes $(1-\pn^{2})^{2}$ are imposed on $p$ and $F^2$ and then differentiated, the derivatives are proportional to $\pn$ and vanish on the axis: $S(\pn=0)=0$ and $J_\varphi=0$ on the magnetic axis (a hollow current). In that case plain Picard does not converge: after $800$ iterations $\|P\bm\psi-\bm\psi\|/\|\bm\psi\|\approx0.11$--$0.12$ while $\|P(P\bm\psi)-\bm\psi\|\sim10^{-12}$, i.e.\ the iterates oscillate between two states, a period-two cycle of $P$. This residual is the same at $\Delta s=0.10,0.05$ and $0.035$, so it is not a resolution effect. With exponents $(1,1,1)$ (source independent of $\psi$) or $(1,2,1)$ (nonzero $p'$ on the axis, source depends on $\psi$) the same code converges to residuals of $10^{-11}$--$10^{-13}$, as does the default derivative-shaped source.
 
-\begin{table}[h]
-\centering
-\caption{Plain Picard (up to 800 iterations) for different ways of imposing the profile shapes ($\Delta s=0.05$; the other resolutions are in \texttt{results/profile\_parametrisation\_check.json}).}
-\label{tab:param}
-\small
-\begin{tabular}{lccc}
-\toprule
-shape imposed on & iterations & $\|P\bm\psi-\bm\psi\|/\|\bm\psi\|$ & $\|P^2\bm\psi-\bm\psi\|/\|\bm\psi\|$\\
-\midrule
-$p'$, $FF'$ (default)             & 23  & $1.6\times10^{-11}$ & $2.2\times10^{-11}$\\
-$p$, $F^2$, exponents $(2,2,2)$   & 800 & $1.1\times10^{-1}$  & $3.8\times10^{-13}$\\
-$p$, $F^2$, exponents $(1,1,1)$   & 2   & $5\times10^{-14}$   & $7\times10^{-14}$\\
-$p$, $F^2$, exponents $(1,2,1)$   & 15  & $1.1\times10^{-11}$ & $1.4\times10^{-11}$\\
-\bottomrule
-\end{tabular}
-\end{table}
+\section{Conclusion}\label{sec:conclusion}
+We have built a fixed-boundary Grad--Shafranov solver on a boundary-fitted, non-homogeneous mesh, following the scheme of L\'opez \emph{et al.}~\cite{lopez2019}, and extended it from their linear Solov'ev setting to the general nonlinear case with arbitrary $p'(\psi)$ and $FF'(\psi)$. The linear solver reproduces the analytic Solov'ev equilibrium at an observed order of about $1.9$, with a maximum error of $7\times10^{-6}$ on a $233\times233$ grid, below the $10^{-5}$ bound reported by L\'opez \emph{et al.}\ at comparable resolution. The nonlinear path, a Picard iteration with the fixed-point residual as stopping criterion and a single sparse LU factorisation reused across iterations, reproduces the Solov'ev solution when fed the Solov'ev source. On a nonlinear case it converges under mesh refinement, at roughly first order for the quantity we monitored. Across seven combinations of boundary shape and profile it reaches residuals of $10^{-11}$ in $15$--$33$ iterations, a count that the spectral radius of the Picard Jacobian, real and positive with $\rho(L)\in[0.22,0.48]$, predicts well. The equilibria show the expected outward Shafranov shift of the magnetic axis, controlled mainly by the ratio of the pressure and toroidal-field amplitudes rather than by the peaking of the profiles.
 
-We have not proved \emph{why} a vanishing source on the axis produces the oscillation; the evidence is this controlled comparison. The practical rule is to impose the profile shapes on $p'$ and $FF'$ for peaked-current equilibria, and to use the fixed-point residual, not the size of the last step, to decide whether a nonlinear run has produced a solution.
-
-\subsection{Outlook}
-\begin{itemize}[nosep]
-\item Implement the constraint of L\'opez \emph{et al.}\ (fixed total current and axis pressure via a coefficient adjusted each iteration), and compare.
-\item Reuse one sparse LU factorisation across Picard iterations, since $A$ does not change.
-\item A free-boundary variant on top of the same matrix machinery; inverse reconstruction of $p'$, $FF'$ from synthetic data.
-\item Quantitative checks of the nonlinear solutions against a published nonlinear equilibrium, which this work does not provide.
-\end{itemize}
-
+The solver has clear limits, which point to natural extensions. Its boundary is prescribed rather than computed, so a free-boundary version would be needed to capture the plasma's response to coil currents and to locate the separatrix and X-points. It also does not hold the total plasma current and axis pressure fixed as in~\cite{lopez2019}, and it could be interesting to explore how implementing that constraint affects accuracy and convergence. On the numerical side, an acceleration scheme such as Anderson's~\cite{anderson1965} could help for more demanding profiles, such as hollow-current or higher-beta ones, which we have not tested. Finally, the same matrix machinery could support the inverse problem of Section~\ref{sec:context}, fitting $p'(\psi)$ and $FF'(\psi)$ to measurements, which would turn the solver from a tool for exploring profile scenarios into one for reconstructing equilibria from real-world tokamak data.
 %=====================================================================
 \appendix
 \section{Derivation of the Grad--Shafranov equation}\label{app:derivation}
 %=====================================================================
-\emph{This derivation follows the approach of Ben Dudson's lecture series ``Plasma fluid theory''~\cite{dudson}.} The three ingredients are $\bB=\nabla\times\bm A$, Ampère's law $\mu_0\bJ=\nabla\times\bB$ (static equilibrium, so the displacement current is irrelevant) and force balance $\bJ\times\bB=\nabla p$. The key assumption is axisymmetry, $\partial_\varphi\equiv0$ on every \emph{scalar} field. The cylindrical basis vectors still depend on $\varphi$,
-\begin{equation}
-\partial_\varphi\er=\ephi,\qquad\partial_\varphi\ephi=-\er,
-\end{equation}
-a subtle point that is precisely what produces the elliptic operator $\Dstar$. We work in statics, $\partial_t\equiv0$.
+\emph{This derivation follows the approach of Ben Dudson's lecture series ``Plasma fluid theory''~\cite{dudson}.} 
 
-\subsection{Step I: vector potential and flux function}
-With $\partial_\varphi=0$, $\bB=\nabla\times\bm A$ reads
-\begin{equation}
-\bB=-\frac1r\frac{\partial}{\partial z}(rA_\varphi)\,\er+\frac1r\frac{\partial}{\partial r}(rA_\varphi)\,\ez+B_\varphi\ephi,\qquad B_\varphi=\partial_zA_r-\partial_rA_z .
-\end{equation}
-Define the poloidal flux function $\psi:=rA_\varphi$. Then
-\begin{equation}
-\bB=-\frac1r\frac{\partial\psi}{\partial z}\er+\frac1r\frac{\partial\psi}{\partial r}\ez+B_\varphi\ephi=\frac1r\nabla\psi\times\ephi+B_\varphi\ephi .
-\end{equation}
-\emph{Field lines lie on flux surfaces.} The poloidal part of $\bB$ is perpendicular to $\nabla\psi$. A vector $\bm u$ tangent to a surface $\psi=\psi_0$ satisfies $\partial_{\bm u}\psi=\bm u\cdot\nabla\psi=0$, so $\nabla\psi$ is normal to the surface; since the poloidal field is also perpendicular to $\nabla\psi$, it is parallel to the surface. Hence field lines lie on the surfaces $\psi=\text{const}$.
-
-\subsection{Step II: Amp\`ere's law}
-Compute $\nabla\times\bB$ term by term. Using $\nabla\times(\bm X\times\bm Y)=(\nabla\!\cdot\!\bm Y)\bm X+(\bm Y\!\cdot\!\nabla)\bm X-(\nabla\!\cdot\!\bm X)\bm Y-(\bm X\!\cdot\!\nabla)\bm Y$ with $\bm X=\tfrac1r\nabla\psi$, $\bm Y=\ephi$:
-\begin{itemize}[nosep]
-\item $\nabla\!\cdot\!\ephi=0$;
-\item $(\bm X\!\cdot\!\nabla)\ephi=0$, since $\bm X$ has no $\varphi$-component and $\ephi$ depends only on $\varphi$;
-\item $(\ephi\!\cdot\!\nabla)\bm X=\frac1r\partial_\varphi\!\Big(\frac1r\frac{\partial\psi}{\partial r}\er+\frac1r\frac{\partial\psi}{\partial z}\ez\Big)=\frac1{r^2}\frac{\partial\psi}{\partial r}\ephi$, using $\partial_\varphi\er=\ephi$ and $\partial_\varphi\ez=0$;
-\item $\nabla\!\cdot\!\bm X=\nabla\!\cdot(\tfrac1r\nabla\psi)=\nabla(\tfrac1r)\!\cdot\!\nabla\psi+\tfrac1r\nabla^2\psi=-\frac1{r^2}\frac{\partial\psi}{\partial r}+\frac1r\nabla^2\psi$, where $\nabla^2\psi=\partial_r^2\psi+\tfrac1r\partial_r\psi+\partial_z^2\psi$ is the axisymmetric scalar Laplacian.
+There are three main steps to the derivation, using 
+\begin{itemize}
+    \item $\mathbf{B}=\nabla \times \mathbf{A}$ (Basic vector potential)
+    \item $\mu_0\mathbf{\mathbf{J}}=\nabla \times \mathbf{B}$ (Maxwell Ampère - we study static equilibrium so the displacement current is irrelevant)
+    \item $\mathbf{J} \times\mathbf{B}=\nabla p$ (MHD)
 \end{itemize}
-Therefore
-\begin{align}
-\nabla\times\Big(\frac1r\nabla\psi\times\ephi\Big)&=\Big[\frac1{r^2}\frac{\partial\psi}{\partial r}+\frac1{r^2}\frac{\partial\psi}{\partial r}-\frac1r\Big(\partial_r^2\psi+\frac1r\partial_r\psi+\partial_z^2\psi\Big)\Big]\ephi\nonumber\\
-&=-\frac1r\Big[\partial_r^2\psi-\frac1r\partial_r\psi+\partial_z^2\psi\Big]\ephi=-\frac1r\Dstar\psi\,\ephi .
-\end{align}
-For the toroidal part, write $B_\varphi\ephi=(rB_\varphi)\,\ephi/r$ and use $\nabla\times(\ephi/r)=0$ (curl in cylindrical coordinates):
-\begin{equation}
-\nabla\times(B_\varphi\ephi)=\nabla(rB_\varphi)\times\frac{\ephi}{r}.
-\end{equation}
-Defining $f:=rB_\varphi$, Ampère's law becomes
-\begin{equation}
-\mu_0\bJ=\underbrace{\frac1r\nabla f\times\ephi}_{\text{poloidal current}}\;\underbrace{-\;\frac1r\Dstar\psi\;\ephi}_{\mu_0J_\varphi\,\ephi}.
-\end{equation}
+The main assumption we use is that of symmetry about the axis, whereby 
+$$\frac{\partial}{\partial\phi}=0$$
+for all scalar fields considered. Note, however, that the cylindrical basis vectors $\hat{\boldsymbol{\phi}}$ and $\mathbf{\hat{r}}$ both retain their dependency on $\phi$, and we still have 
+$$\partial_\phi\mathbf{\hat{r}}=\hat{\boldsymbol{\phi}} \quad \& \quad\partial_\phi\hat{\boldsymbol{\phi}}=-\mathbf{\hat{r}}$$
+This distinction is subtle, and important to keep track of as it leads to the appearance of the elliptic operator $\Delta^*$ which is so central to this problem. As stated, we study static equilibria so $\partial_t\equiv 0$.
 
-\subsection{Step III: force balance}
-Axisymmetry implies $\nabla p\cdot\ephi=0$ (and $\nabla f\cdot\ephi=0$).
+\subsection{Step I: Vector potential}
+    Consider a cylindrical geometry with basis $(r, \phi,z)$. Using symmetry about the axis ($\partial/\partial\phi =0$) the first equation writes
+    $$\mathbf{B}=-\frac{1}{r}\frac{\partial}{\partial z}(rA_{\phi})\hat{\mathbf{r}}+\frac{1}{r}\frac{\partial}{\partial r}(rA_{\phi})\hat{\mathbf{z}}+B_\phi \hat{\boldsymbol{\phi}}$$
+    
+    Where 
+    $$B_\phi =\frac{\partial}{\partial z}A_r-\frac{\partial}{\partial r}A_z$$
+    
+    Define the poloidal flux function
+    $$\psi:=rA_\phi$$
+    Then 
+    $$\begin{aligned}
+        \mathbf{B}&=-\frac{1}{r}\frac{\partial\psi}{\partial z}\hat{\mathbf{r}}+\frac{1}{r}\frac{\partial \psi}{\partial r}\hat{\mathbf{z}}+B_\phi \hat{\boldsymbol{\phi}}\\
+        &=\boxed{\frac{1}{r} \nabla\psi\times\hat{\boldsymbol{\phi}}+B_\phi \hat{\boldsymbol{\phi}}}
+    \end{aligned}
+    $$
 
-\paragraph{$p=p(\psi)$.} From $\bJ\times\bB=\nabla p$ we get $\bB\cdot\nabla p=0$. Inserting $\bB$ and using that only the poloidal part contributes,
-\begin{equation}
-0=\nabla p\cdot\Big(\frac1r\nabla\psi\times\ephi\Big)\;\Longrightarrow\;(\nabla\psi\times\nabla p)\cdot\ephi=0\;\Longrightarrow\;\partial_r\psi\,\partial_zp-\partial_z\psi\,\partial_rp=0 .
-\end{equation}
-So $\nabla p\parallel\nabla\psi$: $p$ and $\psi$ have the same level sets, hence $p=p(\psi)$ and $\nabla p=\frac{\dd p}{\dd\psi}\nabla\psi$.
+    Now imagine a poloidal plane. The purpose of defining $\psi$ as above is that the poloidal part of B, $\mathbf{B_\rho}$, is tangential to surfaces of constant $\psi$. To show this, notice first that $\nabla\psi$ is perpendicular to such surfaces, because the directional derivative along the tangent to the surface is zero. Mathematically, if $\mathbf{u}$ is a tangent to a surface of constant $\psi$, then at that point 
+    $$\frac{\partial}{\partial \mathbf{u}}\psi=0 \iff \mathbf{u} \cdot \nabla\psi=0 \iff \mathbf{u} \perp \nabla\psi$$
+    From the expression for B above, one checks $\nabla\psi\cdot\mathbf{B}=0$ so that $\mathbf{B}$ is also perpendicular to $\nabla\psi$, we conclude that it is co-linear to $\mathbf{u}$. We have thus established that field lines of B are surfaces where $\psi$ is constant.
 
-\paragraph{$f=f(\psi)$.} Similarly $\bJ\cdot\nabla p=0$. The $J_\varphi\ephi$ term drops out because $\nabla p\cdot\ephi=0$, leaving $\nabla p\cdot(\nabla f\times\ephi)=0$, i.e.\ $\ephi\cdot(\nabla p\times\nabla f)=0$. Both $\nabla p$ and $\nabla f$ lie in the $rz$-plane, so their cross product is purely toroidal, and its vanishing means $\nabla f\parallel\nabla p\parallel\nabla\psi$. Hence $f=f(\psi)$ and $\nabla f=\frac{\dd f}{\dd\psi}\nabla\psi$.
+\subsection{Step II: Maxwell-Ampère}
+    Next, we use Maxwell Ampère to find an expression for the current. In order to do so, we compute the curl of B.
+    $$\begin{aligned}
+        \nabla\times\mathbf{B}&=\nabla\times\left(\frac{1}{r}\nabla\psi\times\hat{\boldsymbol{\phi}}\right)+\nabla\times(B_\phi\hat{\boldsymbol{\phi}})    \end{aligned}
+    $$
+    Compute the two parts separately. First, using the vector calculus expansion for $\nabla\times(\mathbf{X\times\mathbf{Y)}}$, 
+    $$\begin{aligned}
+        \nabla\times(\frac{1}{r}\nabla\psi\times\hat{\boldsymbol{\phi}}) &= \underbrace{(\nabla \cdot \hat{\boldsymbol{\phi}})}_{0}\frac{1}{r}\nabla\psi +\underbrace{(\hat{\boldsymbol{\phi}}\cdot\nabla)}_{\frac{1}{r}\frac{\partial}{\partial \phi}}\frac{1}{r}\nabla\psi - \underbrace{\left(\frac{1}{r}\nabla\psi \cdot \nabla\right)\hat{\boldsymbol{\phi}}}_{0} - \left(\nabla\cdot \frac{1}{r} \nabla\psi\right)\hat{\boldsymbol{\phi}}
+        \\
+        &= \frac{1}{r}\frac{\partial}{\partial\phi}\left(\frac{1}{r}\frac{\partial\psi}{\partial r} \mathbf{\hat{r}} + \frac{1}{r} \frac{\partial\psi}{\partial z}\mathbf{\hat{z}}\right)- \left(\nabla\cdot (\frac{1}{r} \nabla\psi)\right)\boldsymbol{\hat{\phi}} \\
+        &= \frac{1}{r^2}\frac{\partial\psi}{\partial r} \frac{\partial\mathbf{\hat{r}}}{\partial\phi} + \frac{1}{r^2} \frac{\partial\psi}{\partial z}\frac{\partial\mathbf{\hat{z}}}{\partial\phi} - \left(\nabla\cdot (\frac{1}{r} \nabla\psi)\right)\boldsymbol{\hat{\phi}}\\
+        &= \left(\frac{1}{r^2}\frac{\partial\psi}{\partial r} - \nabla\cdot (\frac{1}{r} \nabla\psi)\right)\boldsymbol{\hat{\phi}} \\
+        &= \left[\frac{1}{r^2}\frac{\partial\psi}{\partial r} - \left(\nabla(\frac{1}{r}) \cdot \nabla\psi + \frac{1}{r} \nabla^2 \psi \right)\right] \hat{\boldsymbol{\phi}}\\
+        &= \left(\frac{2}{r^2}\frac{\partial\psi}{\partial r}-\frac{1}{r}\frac{\partial^2\psi}{\partial z^2}-\frac{1}{r^2}\frac{\partial\psi}{\partial r}-\frac{\partial^2\psi}{\partial r^2}\right)\hat{\boldsymbol{\phi}} \\
+        &= -\frac{1}{r}\left(\frac{\partial^2\psi}{\partial r^2}-\frac{1}{r}\frac{\partial\psi}{\partial r}+\frac{\partial^2\psi}{\partial z^2}\right)\hat{\boldsymbol{\phi}} \\
+        &= -\frac{1}{r} \Delta ^* \psi \hat{\boldsymbol{\phi}}
+    \end{aligned}
+    $$
 
-\paragraph{Force balance.} With $\bJ=J_\varphi\ephi+\frac1{\mu_0r}\nabla f\times\ephi$ and $\bB=\frac1r\nabla\psi\times\ephi+\frac fr\ephi$, the product of the two poloidal parts vanishes (they are parallel), leaving
-\begin{align}
-\bJ\times\bB&=\frac{J_\varphi}{r}\,\ephi\times(\nabla\psi\times\ephi)-\frac{f}{\mu_0r^2}\,\ephi\times(\nabla f\times\ephi)\nonumber\\
-&=\frac{J_\varphi}{r}\nabla\psi-\frac{f}{\mu_0r^2}\nabla f=\Big(\frac{J_\varphi}{r}-\frac{f}{\mu_0r^2}\frac{\dd f}{\dd\psi}\Big)\nabla\psi,
-\end{align}
-where $\ephi\times(\bm a\times\ephi)=\bm a$ for $\bm a\perp\ephi$ was used. Equating with $\nabla p=\frac{\dd p}{\dd\psi}\nabla\psi$:
-\begin{equation}
-\frac{J_\varphi}{r}-\frac{f}{\mu_0r^2}\frac{\dd f}{\dd\psi}=\frac{\dd p}{\dd\psi}
-\;\Longrightarrow\;-\mu_0rJ_\varphi=-\mu_0r^2\frac{\dd p}{\dd\psi}-f\frac{\dd f}{\dd\psi}.
-\end{equation}
-Finally, Step~II gave $\mu_0J_\varphi=-\frac1r\Dstar\psi$, i.e.\ $-\mu_0rJ_\varphi=\Dstar\psi$, and so we obtain the Grad--Shafranov equation
-\begin{equation}
-\boxed{\Dstar\psi=-\mu_0r^2\frac{\dd p}{\dd\psi}-f\frac{\dd f}{\dd\psi}} .
-\end{equation}
+    Second, multiply and divide by $r$ to write 
+    $$
+    \begin{aligned}
+        \nabla \times(B_\phi \hat{\boldsymbol{\phi}}) &= \nabla\times(rB_\phi\frac{\hat{\boldsymbol{\phi}}}{r}) \\
+        &= rB_\phi\underbrace{(\nabla\times\frac{\hat{\boldsymbol{\phi}}}{r})}_{0}+\nabla(rB_\phi)\times\frac{\hat{\boldsymbol{\phi}}}{r} \\
+        &= \nabla(rB_\phi)\times\frac{\hat{\boldsymbol{\phi}}}{r}
+    \end{aligned}
+    $$
+    where the first term is zero from the equation for curl in cylindrical coordinates.
+    Combining, we get
+    $$\begin{aligned}
+        \mu_0\mathbf{J}&=\underbrace{\nabla(rB_\phi)\times\frac{\hat{\boldsymbol{\phi}}}{r}}_{\text{poloidal current}}+ \underbrace{\left(-\frac{1}{r}\Delta^*\psi\right)}_{\mu_0J_\phi}\,\hat{\boldsymbol{\phi}}
+    \end{aligned}
+    $$
+    
+\subsection{Step III: Using MHD stability equation}
+    We recall that the axi-symmetry assumption implies that the toroidal derivative of the pressure is null, and thus that the pressure gradient has no toroidal component. Mathematically, this can be written as $\nabla p \cdot \hat{\boldsymbol{\phi}}=0$. With this assumption in mind, we now turn to the MHD equilibrium condition. 
 
-\subsection{Non-dimensionalisation}
-In many applications one non-dimensionalises so as to absorb $\mu_0$, after which the equation reads $\tilde\Delta^*\tilde\psi=-\tilde r\tilde J_\varphi$ with $\tilde J_\varphi=\tilde r\,\dd\tilde p/\dd\tilde\psi+(\tilde f/\tilde r)\,\dd\tilde f/\dd\tilde\psi$: a slightly modified Poisson equation with a nonlinear source on the right-hand side.
+    \subsubsection{Intermediate calculations}
+    Some intermediate steps are necessary before we can apply the MHD force balance in full, namely we must define the function $f$ and show that both $p$ and $f$ are functions of $\psi$.
+    
+    \paragraph{Showing $p=p(\psi)$}: From the MHD equation,
+    $$\mathbf{J}\times\mathbf{B}=\nabla p \implies \mathbf{B}\cdot\nabla p =0$$
+    Plugging back in the expression for B,
+    $$\begin{aligned}
+        \nabla p \cdot \mathbf{B}&=\nabla p \cdot \left(\frac{1}{r} \nabla\psi\times\hat{\boldsymbol{\phi}}+B_\phi \hat{\boldsymbol{\phi}}\right) \\
+        &= \nabla p \cdot \left(\frac{1}{r} \nabla\psi\times\hat{\boldsymbol{\phi}}\right) 
+    \end{aligned}
+    $$
+    so that, using the triple product and multiplying through by $r$, we obtain
+    $$(\nabla \psi \times \nabla p) \cdot \hat{\boldsymbol{\phi}}=0$$
+    Computing the cross product,
+    $$ \frac{\partial \psi}{\partial r} \frac{\partial p}{\partial z} - \frac{\partial \psi}{\partial z}\frac{\partial p}{\partial r}=0$$
+    
+    Thus
+    $$\nabla p \propto \nabla \psi$$ 
+    This means that $\psi$ and $p$ have the same level sets, or surfaces of constant value. We deduce that 
+
+    $$p=h \circ\psi$$
+
+    for some function $h$. Written more concisely, $p=p(\psi)$, and 
+    $$\nabla p = \frac{d p}{d\psi}\,\nabla\psi$$
+
+    \paragraph{Building the F function and showing $f=f(\psi)$}: The same way from the MHD equation, we get 
+    $$\begin{aligned}
+        \nabla p\cdot\mathbf{J}=0 &\implies \nabla p \cdot \left[\nabla(rB_\phi)\times\frac{\hat{\boldsymbol{\phi}}}{r}+ \left(-\frac{1}{r}\Delta^*\psi\right)\,\hat{\boldsymbol{\phi}}\right] =0 \\
+        &\implies \nabla p \cdot \left(\nabla(rB_\phi) \times \hat{\boldsymbol{\phi}}\right) =0 \\
+        &\implies \hat{\boldsymbol{\phi}} \cdot \left(\nabla p \times \nabla(rB_\phi)\right)=0
+    \end{aligned} $$
+
+    This is the opportune moment to define 
+    $$ f := rB_\phi$$
+    Again using the axi-symmetry assumption, we have 
+    $$\frac{\partial f}{\partial \phi}=0$$
+    from which 
+    $$\nabla f \cdot \boldsymbol{\hat{\phi}}=0$$
+    Thus both $\nabla p $ and $\nabla f$ are in the rz-plane, which implies that their cross product is perpendicular and along the toroidal direction only. From the previous equation, the toroidal component of the cross product vanishes. The only possibility remaining is that $\nabla p$ and $\nabla f$ are co-linear. But then $\nabla f \propto \nabla \psi$ as well since $\nabla p$ was shown co-linear to $\nabla \psi$. By the same argument as in the previous calculation, we deduce 
+    $$f = f(\psi), \quad \nabla f=\frac{d f}{d\psi}\,\nabla\psi$$
+
+    \subsubsection{Applying the force balance}
+
+    We are now ready to write out the MHD force balance in full. Computing,
+    $$\begin{aligned}
+    \mathbf{J}\times\mathbf{B}&=\left[J_\phi \hat{\boldsymbol{\phi}}+\frac{1}{r\mu_0}\nabla f\times\hat{\boldsymbol{\phi}} \right] \times \left[\frac{1}{r} \nabla\psi\times\hat{\boldsymbol{\phi}}+B_\phi \hat{\boldsymbol{\phi}}\right] \\
+    &=\frac{J_\phi}{r}\hat{\boldsymbol{\phi}}\times(\nabla\psi\times\hat{\boldsymbol{\phi}}) - \frac{B_\phi}{\mu_0 r}\hat{\boldsymbol{\phi}}\times(\nabla f \times \hat{\boldsymbol{\phi}}) \\
+    &= \frac{J_\phi}{r}(\nabla\psi \,(\underbrace{\hat{\boldsymbol{\phi}} \cdot \hat{\boldsymbol{\phi}}}_{1})-\hat{\boldsymbol{\phi}}\,(\underbrace{\hat{\boldsymbol{\phi}} \cdot\nabla\psi}_{0}))-\frac{f}{\mu_0 r^2}(\nabla f\,(\underbrace{\hat{\boldsymbol{\phi}}\cdot\hat{\boldsymbol{\phi}}}_{1})-\hat{\boldsymbol{\phi}}\,(\underbrace{\hat{\boldsymbol{\phi}}\cdot\nabla f}_0)) \\
+    &= \left(\frac{J_\phi}{r}-\frac{f}{\mu_0 r^2}\frac{d f}{d\psi}\right)\nabla\psi
+    \end{aligned}$$
+
+    Equating with the right hand side, we obtain
+
+    $$\left(\frac{J_\phi}{r}-\frac{f}{\mu_0 r^2}\frac{d f}{d\psi}\right)\nabla\psi=\frac{dp}{d\psi}\,\nabla\psi$$
+
+    from which we get the scalar equation 
+
+    $$\frac{J_\phi}{r}-\frac{f}{\mu_0 r^2}\frac{d f}{d\psi}=\frac{dp}{d\psi}$$
+
+    Multiply through by $-\mu_0r^2$ to get
+
+    $$-r\mu_0J_\phi+f\frac{df}{d\psi}=-r^2\mu_0\frac{dp}{d\psi}$$
+
+    Rearranging,
+
+    $$-r\mu_0J_\phi=-r^2\mu_0\frac{dp}{d\psi}-f\frac{df}{d\psi}$$
+
+    \subsubsection{Grad-Shafranov}
+    
+    Recalling 
+
+    $$\mu_0J_\phi=-\frac{1}{r}\Delta^*\psi$$
+
+    we insert on the left hand side of the previous equation and obtain the Grad-Shafranov equilibrium:
+
+    $$\boxed{\Delta^*\psi=-\mu_0r^2\frac{dp}{d\psi}-f\frac{df}{d\psi}}$$
+
+
 
 \begin{thebibliography}{9}
 \bibitem{lopez2019} J.~E. L\'opez, E.~A. Orozco and V.~D. Dougar-Zhabon, \emph{Fixed boundary Grad--Shafranov solver using finite difference method in nonhomogeneous meshgrid}, J.\ Phys.: Conf.\ Ser.\ \textbf{1159}, 012017 (2019). doi:10.1088/1742-6596/1159/1/012017
+\bibitem{troyon1984} Troyon F., Gruber R., Saurenmann H., Semenzato S. and Succi S., \emph{MHD-Limits to Plasma Confinement},
+Plasma Physics and Controlled Fusion \textbf{29}, (1984), 209-215
 \bibitem{jardin2010} S.~C. Jardin, \emph{Computational Methods in Plasma Physics}, CRC Press (2010).
 \bibitem{dudson} B.~Dudson, \emph{Plasma fluid theory}, lecture series (YouTube).
+\bibitem{anderson1965} D.~G. Anderson, \emph{Iterative procedures for nonlinear integral equations}, J.\ ACM \textbf{12}, 547 (1965).
 \end{thebibliography}
 \end{document}
