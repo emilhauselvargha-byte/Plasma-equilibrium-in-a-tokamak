@@ -65,12 +65,6 @@ it is not small (and if the iteration looks like a period-2 cycle).
 ![Soloviev benchmark](figures/soloviev_benchmark.png)
 ![Nonlinear profiles](figures/nonlinear_profiles.png)
 
-## Design note: why the profile shapes are on p' and FF'
-Shaping `p` and `F²` and differentiating afterwards makes the source vanish on the magnetic axis (hollow current) for
-exponents ≥ 2, and plain Picard then oscillates on a period-2 cycle (`‖Pψ−ψ‖/‖ψ‖ ≈ 0.11`, resolution-independent).
-`scripts/profile_parametrisation_check.py` reproduces this against the default and two control cases.
-Not covered: hollow-current / advanced scenarios, free boundary, comparison with a published nonlinear reference.
-
 ## References
 López, Orozco & Dougar-Zhabon, *J. Phys.: Conf. Ser.* **1159**, 012017 (2019) — numerical scheme, Solov'ev benchmark ·
 Jardin, *Computational Methods in Plasma Physics* (CRC Press, 2010) — Picard iteration ·
