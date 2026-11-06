@@ -23,7 +23,7 @@ scripts/                  reproducible studies that generate figures/ and result
    spectral_study.py          spectrum of the Picard Jacobian vs observed iteration counts
    profile_parametrisation_check.py   why the shapes are on p' and FF' (see below)
 figures/  results/        outputs used in the report (PNG / JSON)
-docs/paper/               LaTeX source;   docs/derivation/  standalone derivation notes
+docs/paper/               written report LaTeX source + compiled pdf
 ```
 
 ## Quick start
