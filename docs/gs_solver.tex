@@ -19,13 +19,13 @@
 
 \title{\textbf{A finite-difference Grad--Shafranov solver\\ on a boundary-fitted non-homogeneous mesh:\\ Solov'ev benchmark and nonlinear Picard equilibria}}
 \author{Hausel-Vargha Emil}
-\date{Last updated: November, 2026}
+\date{Work carried out: February--May, 2026\\ Write-up: November, 2026}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-We built a fixed-boundary Grad--Shafranov (GS) solver written in Python. The solver follows the finite-difference scheme on a boundary-fitted non-homogeneous mesh of L\'opez, Orozco and Dougar-Zhabon~\cite{lopez2019}, which they validated only for the linear Solov'ev case, and extends it to the general nonlinear case with arbitrary $p'(\psi)$ and $FF'(\psi)$ through Picard iteration~\cite{jardin2010}. We describe the mesh construction, the discretisation, the sparse linear algebra and the iteration; we benchmark the linear solve against the analytic Solov'ev equilibrium (observed order of convergence $\approx 1.9$, maximum error $7\times10^{-6}$ on a $233\times233$ grid); we validate the nonlinear code path; we show nonlinear equilibria for several profiles and boundary shapes; and we study the spectrum of the Picard map, whose spectral radius predicts the observed observed number of iterations well.
+We built a fixed-boundary Grad--Shafranov (GS) solver written in Python. The solver follows the finite-difference scheme on a boundary-fitted non-homogeneous mesh of L\'opez, Orozco and Dougar-Zhabon~\cite{lopez2019}, which they validated only for the linear Solov'ev case, and extends it to the general nonlinear case with arbitrary $p'(\psi)$ and $FF'(\psi)$ through Picard iteration~\cite{jardin2010}. We describe the mesh construction, the discretisation, the sparse linear algebra and the iteration; we benchmark the linear solve against the analytic Solov'ev equilibrium (observed order of convergence $\approx 1.9$, maximum error $7\times10^{-6}$ on a $233\times233$ grid); we validate the nonlinear code path; we show nonlinear equilibria for several profiles and boundary shapes; and we study the spectrum of the Picard map, whose spectral radius predicts the observed number of iterations well.
 \end{abstract}
 \clearpage
 

@@ -22,3 +22,6 @@ venv/
 *.toc
 *.bbl
 *.blg
+
+# latexmk temporary files
+*.tmp

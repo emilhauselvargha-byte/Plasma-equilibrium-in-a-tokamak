@@ -8,7 +8,9 @@ The numerical scheme follows López, Orozco & Dougar-Zhabon, *J. Phys.: Conf. Se
 the **linear Solov'ev** case. This project reproduces that benchmark and goes further: it also handles the **nonlinear**
 case, i.e. arbitrary `p'(ψ)` and `FF'(ψ)`, via Picard iteration, and studies the spectrum of that iteration.
 
-**Full write-up:** [`docs/gs_solver_report.pdf`](docs/gs_solver_report.pdf) (LaTeX source in `docs/paper/`):
+The solver and the numerical studies were developed between February and May 2026; the documentation and the report were written up in November 2026.
+
+**Full write-up:** [`docs/gs_solver.pdf`](docs/gs_solver.pdf) (LaTeX source in [`docs/gs_solver.tex`](docs/gs_solver.tex)):
 context (what GS is, why it matters, fixed vs free boundary), the solver, the Solov'ev benchmark, nonlinear validation
 and profiles, the Picard convergence analysis, and the full derivation of the equation in the appendix.
 
@@ -23,7 +25,7 @@ scripts/                  reproducible studies that generate figures/ and result
    spectral_study.py          spectrum of the Picard Jacobian vs observed iteration counts
    profile_parametrisation_check.py   why the shapes are on p' and FF' (see below)
 figures/  results/        outputs used in the report (PNG / JSON)
-docs/paper/               written report LaTeX source + compiled pdf
+docs/                     written report LaTeX source + compiled pdf
 ```
 
 ## Quick start
@@ -35,7 +37,7 @@ python scripts/nonlinear_validation.py
 python scripts/profiles_nonlinear.py
 python scripts/spectral_study.py
 python scripts/profile_parametrisation_check.py
-cd docs/paper && latexmk -pdf gs_solver.tex
+cd docs && latexmk -pdf gs_solver.tex
 ```
 Options (geometry, physics mode, profile exponents, `ds`, …) are module-level variables at the top of
 `src/gs_solver.py`; the scripts override them programmatically.
