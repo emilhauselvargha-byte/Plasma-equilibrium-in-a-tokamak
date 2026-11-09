@@ -628,7 +628,7 @@ def solve_picard(A_csc, bnd, rmesh, zmesh, coords):
     if res_P > 1e3 * PICARD_EPS:
         print("  ⚠ WARNING: not converged — ψ is NOT a fixed point of the Picard map.")
         if res_P2 < 1e-3 * res_P:
-            print("    ‖P²ψ−ψ‖ is tiny: the iteration is oscillating on a period-2 cycle (see docs/paper, Sec. 4.3).")
+            print("    ‖P²ψ−ψ‖ is tiny: the iteration is oscillating on a period-2 cycle (see docs/gs_solver.pdf, Sec. 2.5).")
 
     print(f"  ψ ∈ [{psi.min():.6f}, {psi.max():.6f}]")
 
@@ -640,7 +640,7 @@ def solve_picard(A_csc, bnd, rmesh, zmesh, coords):
     nrm = np.linalg.norm(psi)
     def Lv(v):
         eps = 1e-6 * nrm / np.linalg.norm(v)
-        return (_picard_step(psi + eps * v, A_csc, rmesh, coords, bnd) - _picard_step(psi - eps * v, A_csc, rmesh, coords, bnd)) / (2 * eps)
+        return (_picard_step(psi + eps * v, A_csc_lu, rmesh, coords, bnd) - _picard_step(psi - eps * v, A_csc_lu, rmesh, coords, bnd)) / (2 * eps)
 
     N = psi.size
     L_op = LinearOperator((N, N), matvec=Lv, dtype=float)
@@ -817,8 +817,8 @@ def make_plots(psi, rmesh, zmesh, inside, coords, bnd, fname_override=None):
                         if k not in bnd]
             k_ax, ir_ax, iz_ax = min(interior, key=lambda t: psi[t[0]])
             for sgn, lab in ((1, 'Mag. axis'), (-1, None)):
-                ax.plot(rmesh[ir_ax], sgn * zmesh[iz_ax], '+', color='black', ms=15, mew=4.5)   # outline
-                ax.plot(rmesh[ir_ax], sgn * zmesh[iz_ax], '+', color='white', ms=14, mew=2.2, label=lab)
+                ax.plot(rmesh[ir_ax], sgn * zmesh[iz_ax], '+', color='black', ms=15, mew=4.5, label=lab)   # outline (also the legend marker)
+                ax.plot(rmesh[ir_ax], sgn * zmesh[iz_ax], '+', color='white', ms=14, mew=2.2)
             print(f"  Magnetic axis:  R = {rmesh[ir_ax]:.4f},  Z = {zmesh[iz_ax]:.4f}")
 
         cbar = plt.colorbar(cf, ax=ax, fraction=0.04, pad=0.02)
