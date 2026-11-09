@@ -69,3 +69,6 @@ it is not small (and if the iteration looks like a period-2 cycle).
 López, Orozco & Dougar-Zhabon, *J. Phys.: Conf. Ser.* **1159**, 012017 (2019) — numerical scheme, Solov'ev benchmark ·
 Jardin, *Computational Methods in Plasma Physics* (CRC Press, 2010) — Picard iteration ·
 B. Dudson, *Plasma fluid theory* (YouTube lecture series) — derivation in the appendix.
+
+## License
+Released under the [MIT License](LICENSE).
