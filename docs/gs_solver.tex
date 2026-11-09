@@ -445,6 +445,9 @@ We have built a fixed-boundary Grad--Shafranov solver on a boundary-fitted, non-
 
 The solver has clear limits, which point to natural extensions. Its boundary is prescribed rather than computed, so a free-boundary version would be needed to capture the plasma's response to coil currents and to locate the separatrix and X-points. It also does not hold the total plasma current and axis pressure fixed as in~\cite{lopez2019}, and it could be interesting to explore how implementing that constraint affects accuracy and convergence. On the numerical side, an acceleration scheme such as Anderson's~\cite{anderson1965} could help for more demanding profiles, such as hollow-current or higher-beta ones, which we have not tested. Finally, the same matrix machinery could support the inverse problem of Section~\ref{sec:context}, fitting $p'(\psi)$ and $FF'(\psi)$ to measurements, which would turn the solver from a tool for exploring profile scenarios into one for reconstructing equilibria from real-world tokamak data.
 %=====================================================================
+\section*{Acknowledgements}
+This work was carried out as a project for the Classical Electrodynamics course at \'Ecole Polytechnique, within a group in which each member worked on a different part of the problem and ended up with their own version of the solver. I thank Jacques Stefani for presenting me with the Picard iteration method from Jardin's book. I also thank Prof. Arnaud Couairon for the regular meetings throughout the project in which we discussed its progress.
+
 \appendix
 \section{Derivation of the Grad--Shafranov equation}\label{app:derivation}
 %=====================================================================
