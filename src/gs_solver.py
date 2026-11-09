@@ -52,7 +52,7 @@ import time
 OUTPUT_DIR = 'figures'
 THEME = 'light'              # 'light' (white background, default) or 'dark'
 SHOW = True                # True for interactive windows (e.g. %matplotlib qt)
-SPECTRAL_ANALYSIS = False   # Arnoldi study of the Picard Jacobian (slow on fine grids)
+SPECTRAL_ANALYSIS = True   # Arnoldi study of the Picard Jacobian (slow on fine grids)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION I-A  ·  GEOMETRY SELECTION
@@ -66,8 +66,8 @@ SPECTRAL_ANALYSIS = False   # Arnoldi study of the Picard Jacobian (slow on fine
 #                            Z(R) = ±√(a − b(R²−R0²)²) / R
 #                            (closed D-shape; requires R0, k0, q0 — see I-C)
 #
-GEOMETRY = 'SOLOVIEV'           # <── change here
-#GEOMETRY = 'SHAFRANOV'
+#GEOMETRY = 'SOLOVIEV'           # <── change here
+GEOMETRY = 'SHAFRANOV'
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION I-B  ·  PHYSICS MODE SELECTION
@@ -81,8 +81,8 @@ GEOMETRY = 'SOLOVIEV'           # <── change here
 #
 #  PHYSICS = 'CUSTOM'            — you supply source_custom(r, psi_n) directly
 #
-PHYSICS = 'SOLOVIEV_LINEAR'     # <── change here
-#PHYSICS = 'PICARD_NONLINEAR'
+#PHYSICS = 'SOLOVIEV_LINEAR'     # <── change here
+PHYSICS = 'PICARD_NONLINEAR'
 #PHYSICS = 'CUSTOM'
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -91,12 +91,12 @@ PHYSICS = 'SOLOVIEV_LINEAR'     # <── change here
 
 # ── Shared ────────────────────────────────────────────────────────────────────
 R0  = 0.95     # major radius (normalised units; set to 1 for true normalisation)
-ds  = 1.2e-2    # arc-length step along boundary (smaller = finer grid, slower)
+ds  = 6e-3    # arc-length step along boundary (smaller = finer grid, slower)
 
 # ── SHAFRANOV shape parameters (ignored when GEOMETRY = 'SOLOVIEV') ──────────
 a_sha     = 0.6   # minor radius  (normalised to R0 if R0=1, else metres)
 delta_sha = 0.8   # triangularity
-kappa_sha = 1   # elongation
+kappa_sha = 2   # elongation
 
 # ── SOLOVIEV shape parameters (ignored when GEOMETRY = 'SHAFRANOV') ──────────
 #    These also fix the Soloviev source when PHYSICS = 'SOLOVIEV_LINEAR'.
@@ -122,9 +122,9 @@ psi_b = 0.09   # Dirichlet boundary value of ψ
 #
 #    NOTE: only the ratio p0/alpha matters for the normalised Picard map (the overall amplitude is removed
 #    by the ψ_n renormalisation).
-sp1 = 2
-sp2 = 2
-sf1 = 2
+sp1 = 1
+sp2 = 1
+sf1 = 1
 sf2 = 1
 
 # ── Picard amplitude parameters ───────────────────────────────────────────────
@@ -133,7 +133,7 @@ alpha = 1   # FF' amplitude                  (scales the constant term of S)
 
 # ── Picard iteration controls ────────────────────────────────────────────────
 #  Plain Picard  ψ ← P(ψ).  Stopping test: fixed-point residual ‖P(ψ) − ψ‖/‖ψ‖ < PICARD_EPS.
-MAX_ITER      = 300
+MAX_ITER      = 100
 PICARD_EPS    = 1e-9
 LAST_DIAG     = {}      # filled by solve_picard: iterations, res_P, res_P2
 
@@ -575,8 +575,10 @@ def solve_linear(A_csc, bnd, rmesh, coords):
     print(f"  ψ ∈ [{psi.min():.6f}, {psi.max():.6f}]")
     return psi*psi_b
 
-def _picard_step(psi, A_csc_lu, rmesh, coords, bnd):
-    """One Picard step: evaluate source at current ψ, solve, re-normalise."""
+def _picard_step(psi, lu_dinv, rmesh, coords, bnd):
+    """One Picard step: evaluate source at current ψ, solve, re-normalise. lu_dinv is a tuple 
+    (lu, dinv) where lu = splu(A_csc scaled by dinv) and dinv = 1.0 / A_csc.diagonal()"""
+    lu, dinv = lu_dinv
     source_fn = get_source_fn()
     N = len(coords)
     b_vec = np.zeros(N)
@@ -594,17 +596,22 @@ def _picard_step(psi, A_csc_lu, rmesh, coords, bnd):
             pn       = np.clip((psi[k] - psi_min) / denom, 0.0, 1.0)
             b_vec[k] = source_fn(rmesh[ir], pn)
 
-    psi_new = A_csc_lu.solve(b_vec)
+    psi_new = lu.solve(b_vec*dinv)
     return _normalise_psi(psi_new, bnd)
 
 def solve_picard(A_csc, bnd, rmesh, zmesh, coords):
     """
     Plain Picard iteration  ψ ← P(ψ)  for the nonlinear GS problem.
     The stopping test and the reported diagnostics use the true fixed-point residual ‖P(ψ) − ψ‖/‖ψ‖.
+    We divide each row of the equation by the diagonal element of A to better condition the problem, 
+    which decreases rounding error.
     """
     N = len(coords)
+    dinv = 1.0 / A_csc.diagonal()
+    A_csc.data *= dinv[A_csc.indices]   # divide row i by A[i, i], stays CSC 
     A_csc_lu = splu(A_csc)
-    P = lambda x: _picard_step(x, A_csc_lu, rmesh, coords, bnd)
+    lu_dinv = (A_csc_lu, dinv)
+    P = lambda x: _picard_step(x, lu_dinv, rmesh, coords, bnd)
     rel = lambda a, b: np.linalg.norm(a - b) / (np.linalg.norm(b) + 1e-15)
     psi = np.zeros(N)
     for k in bnd:
@@ -622,13 +629,11 @@ def solve_picard(A_csc, bnd, rmesh, zmesh, coords):
     n_it = it + 1
 
     res_P  = rel(P(psi), psi)
-    res_P2 = rel(P(P(psi)), psi)
-    LAST_DIAG.clear(); LAST_DIAG.update(iterations=n_it, res_P=res_P, res_P2=res_P2)
-    print(f"  {n_it} iterations   residual ‖Pψ−ψ‖/‖ψ‖ = {res_P:.2e}   ‖P²ψ−ψ‖/‖ψ‖ = {res_P2:.2e}")
+    #res_P2 = rel(P(P(psi)), psi)
+    LAST_DIAG.clear(); LAST_DIAG.update(iterations=n_it, res_P=res_P)
+    print(f"  {n_it} iterations   residual ‖Pψ−ψ‖/‖ψ‖ = {res_P:.2e}")
     if res_P > 1e3 * PICARD_EPS:
         print("  ⚠ WARNING: not converged — ψ is NOT a fixed point of the Picard map.")
-        if res_P2 < 1e-3 * res_P:
-            print("    ‖P²ψ−ψ‖ is tiny: the iteration is oscillating on a period-2 cycle (see docs/gs_solver.pdf, Sec. 2.5).")
 
     print(f"  ψ ∈ [{psi.min():.6f}, {psi.max():.6f}]")
 
@@ -640,7 +645,7 @@ def solve_picard(A_csc, bnd, rmesh, zmesh, coords):
     nrm = np.linalg.norm(psi)
     def Lv(v):
         eps = 1e-6 * nrm / np.linalg.norm(v)
-        return (_picard_step(psi + eps * v, A_csc_lu, rmesh, coords, bnd) - _picard_step(psi - eps * v, A_csc_lu, rmesh, coords, bnd)) / (2 * eps)
+        return (_picard_step(psi + eps * v, lu_dinv, rmesh, coords, bnd) - _picard_step(psi - eps * v, lu_dinv, rmesh, coords, bnd)) / (2 * eps)
 
     N = psi.size
     L_op = LinearOperator((N, N), matvec=Lv, dtype=float)
